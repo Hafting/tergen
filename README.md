@@ -23,23 +23,36 @@ To compile, just run 'make'.
 
 ## Program usage
 ./tergen topology wrapping xsize ysize randomseed land% hillmountain% tempered% wateronland%
+
 All parameters has defaults and may be omitted.
 ### Topologies
 0 - square tiles
+
 1 - square tiles, isometric
+
 2 - hex tiles
+
 3 - hex tiles, isometric
+
 Isometric seems to double the with and halve the height. Compensate by changing xsize and ysize
 ### Wrap parameter
 0 - no wrap, the game map has 4 edges. Mercator style map, where the north and south edges are polar terrain, and equator follows the middle of the map.
-1 - wrap in the x direction, east-west. North and south is still polar edges.
+
+1 - wrap in the x direction, east-west. North and south are still polar edges.
+
+
 2 - wrap in x and y directions. Two round poles are created. Equator is the set of tiles furthest away from both poles.
 ### Other parameters
 xsize and ysize specify the map size in tiles
+
 Specifying a different random seed gives a completely different map. The initial continents, as well as the tectonic plates, are all random.
+
 The land percentage specify how much land and sea there will be.
+
 The hillmountain percentage specify how much of the land will be hills and mountains. The mountains will be a third of that.
+
 The tempered parameter defaults to 50. Decrease to get more polar terrain, increase to get more deserts. Note that even a very cold planet will have deserts – a desert is dry land, it does not have to be hot. 
+
 The wateronland parameter decides how wet the terrain will be. Increase to get more swamps, forests and rivers. Decrease to get fewer rivers and more desert.
 ## Use the produced map
 The program produces the file tergen.sav, which is a scenario file. Move it into your scenario folder. On Linux, this is ~/.freeciv/scenarios/  Then, start a scenario from the game menu. "Tergen" should be one of the alternatives.
