@@ -1117,35 +1117,38 @@ int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[9][m
 	If there is a neighbour river with more flow, merge into that instead, as long is it is on a lower tile.  Such coalescing improves the river systems a lot
 	Also calculate steepness, based on the height difference between this tile and the outflow tile. Steepness is used for erosion, and for deciding how much of the wetness that leaves in the river.
 */
-void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy]) {
+void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheight) {
 	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 	char lownb = 0;
 	char flowlownb = -127;
-	int flowflow = -127;
+	int maxflow = 1;
 	short lowheight = 32767; //Higher than highest, some neighbour will be chosen
 	tiletype *t = &tile[x][y];
 	tiletype *neigh;
 	short flowlowheight = lowheight;
 	for (int n = 0; n < neighbours[topo]; ++n) {
 		neigh = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
-		short testheight = neigh->height;
-		if (testheight < lowheight) {
-			lowheight = testheight;
+		if (neigh->height < lowheight) {
+			lowheight = neigh->height;
 			lownb = n;
 		}
-		if ((neigh->height < t->height) && (neigh->oldflow > flowflow)) {
-			flowflow = neigh->oldflow;
+		if ((neigh->height < t->height) && (neigh->oldflow > maxflow)) {
+			maxflow = neigh->oldflow;
 			flowlownb = n;
-			flowlowheight = testheight;
+			flowlowheight = neigh->height;
 		}
 	}
-	if (flowlownb == -127) {
-		flowlownb = lownb;
+	if (flowlownb == -127) { //No lower tile with riverflow
+		flowlownb = lownb; //use lowest neighbour instead
 		flowlowheight = lowheight;
 	}
 	tile[x][y].lowestneigh = flowlownb;
-	lowheight = tile[x][y].height - flowlowheight;
-	tile[x][y].steepness = (flowlowheight <= 0) ? 0 : 1+log2(flowlowheight);
+
+	/* Don't use height difference underwater */
+	if (flowlowheight < seaheight) flowlowheight = seaheight; 
+
+	short heightdiff = tile[x][y].height - flowlowheight;
+	tile[x][y].steepness = (heightdiff <= 0) ? 0 : 1+log2(heightdiff);
 }
 
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
@@ -1329,7 +1332,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
 			if (cloudcap < 0) cloudcap = 0;
 			//found the cloud capacity over this tile. But do not evaporate over half of a land tile:
-			if (t->terrain == 'm' && t->wetness/2 < cloudcap) cloudcap = t->wetness/2;
+			if (t->terrain == 'm') {
+			 	if (t->wetness/2 < cloudcap) cloudcap = t->wetness/2;
+			}
 			//Evaporate
 			ab->water += cloudcap;
 			if (t->terrain == 'm') t->wetness -= cloudcap;
@@ -1404,8 +1409,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 		//Let the clouds rain, wetting the ground
 		for (int h = 0; h<9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-			//Skip underground clouds
-			//skip airboxes that are underground:
+			//Skip airboxes that are underground:
 			tiletype *t = &tile[x][y];
 			int abovesea = t->height - seaheight;
 			if (abovesea < 0) abovesea = 0;
@@ -1415,7 +1419,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Make a small amount of rain unconditionally
 			int rain = ab->water / 25;
 			ab->water -= rain;
-			t->wetness += rain;
+			if (t->terrain == 'm') t->wetness += rain; 
 			//If the cloud has more water than it can hold,
 			//drop a large amount of it:
 			int cloudcap = cloudcapacity(airheight[h], abovesea, t->temperature);
@@ -1442,9 +1446,11 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//skip sea tiles
 			if (t->terrain == ':') continue;
 			//Find lowest neighbour & steepness.  
-			find_next_rivertile(x, y, tile); //steepness 0–12
-			//Less runoff from flat land, more from steeper, most from mountains.
-			int waterflow = t->wetness / (4 - t->steepness/4);
+			find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
+			/*Less runoff from flat land, more from steeper, most from mountains. But not all.
+				Steepness from 0 to 14. 3/(7-steepness) yields 3/8, 3/7, 3/6, 3/5, 3/4
+				*/
+			int waterflow = 3*t->wetness / (7 - t->steepness/3);
 			t->wetness -= waterflow;
 
 			//More emphasis to rivers composed from several tiles, than a single large mountain
@@ -1494,7 +1500,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				}
 				pprevx = prev_x; pprevy = prev_y; prev_x = nx; prev_y = ny; 
 				t = &tile[prev_x][prev_y];
-				find_next_rivertile(prev_x, prev_y, tile);
+				find_next_rivertile(prev_x, prev_y, tile, seaheight);
 			} while (t->terrain != ':'); //Stop river upon reaching the sea
 			t->waterflow += waterflow;
 			t->height += rocks; 
