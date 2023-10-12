@@ -1012,8 +1012,10 @@ void init_weather(tiletype tile[mapx][mapy], airboxtype air[9][mapx][mapy], weat
 				float dy1 = (float)y / mapy;
 				float dy2 = (float)(mapy/2-y) / mapy;
 
-				float r1 = sqrtf(dx1*dx1+dy1*dy1);
-				float r2 = sqrtf(dx2*dx2+dy2*dy2);
+				int isocorr = (topo & 1) + 1;
+
+				float r1 = sqrtf(dx1*dx1+dy1*dy1/isocorr);
+				float r2 = sqrtf(dx2*dx2+dy2*dy2/isocorr);
 
 				float total = r1+r2;
 				//Computed "latitude"
