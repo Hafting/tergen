@@ -319,6 +319,7 @@ Each round also erodes the terrain. Too many, and it may all be flat.
 #define ROUNDS 100
 
 
+
 /* Make a tectonic plate, not too close to other plates. */
 int mkplate(int const plates, int const ix, platetype plate[plates]) {
 	//Up to 5 tries, or give up. Fewer plates is not a problem
@@ -1160,7 +1161,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		to avoid discontinuities.	Similar for 257,67...
 
 		ISO uses different tile layouts. To avoid wide flat continents,
-		consider that an ISO 3x6 world is square. 
+		consider that an ISO 3x6 world is square.
 	*/
 	float mapy2 = mapy, mapx2 = mapx;
 	if (mapx > mapy) {
@@ -1170,7 +1171,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		int factor = (mapy + 0.5 * mapx)/mapx;
 		mapy2 = (float)mapy / factor;
 	}
-	
+	if (topo & 1) mapy2 *= 2; //ISO correction
 	float halfx = mapx / 2.0 - 0.5, halfy = mapy / 2.0 - 0.5;
 
   for (int x = mapx; x--;) for (int y = mapy; y--;) {
@@ -1178,13 +1179,14 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 		float fxb = (x-halfx)*2*M_PI/mapx;
 		float fyb = (y-halfy)*2*M_PI/mapy;
+		if (topo & 1) fyb /= 2; //ISO correction
 
 		//Random fuzziness
 		float frndx = frand(-.5, .5);
 		float frndy = frand(-.5, .5);
 
 		//Regular pattern, yields 8 round continents on quadratic grid
-		//errors on hex grid hidden in fuzz.
+		//edge errors on hex grid hidden in fuzz.
 		//with fussy edges
 		float h1 =  sinf(fx*2+frndx+xphase)*cosf(fy*2+frndy+yphase);
 
@@ -1216,8 +1218,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		}
 		tile[x][y].height = heightsum / (neighbours[topo]+2); //rocks is not in use at this stage
 	}
-
-
 
 
 	//Phase 2: plate tectonics, weather & erosion
@@ -1279,7 +1279,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//Terrain BEFORE plate tectonics (debug):
 	//output(stdout, land, hillmountain, tempered, wateronland, tile, tp, weather);
-
 	
 	neighpostype *np = nposition[topo];
 	/* Move plates */
