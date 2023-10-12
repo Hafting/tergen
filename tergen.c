@@ -189,7 +189,6 @@ void my_sincosf(float x, float *sinx, float *cosx) {
 }
 
 #define sincosf(a,b,c) my_sincosf(a,b,c)
-
 #endif
 
 
@@ -230,7 +229,6 @@ typedef struct {
 	float vx, vy; //Plate velocity, in tiles/round
 	int rx, ry;   //max tile dist from cx or cy, limits searches
 	char ix;      //plate number
-
 } platetype;
 
 typedef struct {
@@ -989,15 +987,7 @@ void find_wind(float latitude, int east, char *wind1, char *wind2, char *wstreng
 
 
 /*  Initialize weather data. Tile temperatures, atmosphere above them
-
-		Temperature map:
-		 - ok for nonwrapping map. reasonable pole sizes and terrain
-		 - seems ok for a 60x60 hex map.
-
-		  
-
-
-	 */
+*/
 void init_weather(tiletype tile[mapx][mapy], airboxtype air[9][mapx][mapy], weatherdata weather[mapx][mapy], int tempered) {
 	memset(air, 0, 9*mapx*mapy*sizeof(airboxtype));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
@@ -1005,23 +995,6 @@ void init_weather(tiletype tile[mapx][mapy], airboxtype air[9][mapx][mapy], weat
 		t->wetness = t->waterflow = 0;
 		t->rocks = 0;
 	}
-	/*                                    sea  sea  land land
-		 tempered                           min  max   min  max
-		 100 no ice                           0  40      0   70
-		  70 hot planet, little ice/polar
-			50 NORMAL                          -6  30    -20   60
-			30 cold planet, little tropic
-			 0 no tropics, much ice           -12  20    -40   50
-
-
-			A cold planet will still have deserts. Because deserts aren't
-		  hot, they are dry! There is little evaporation in the cold.	
-
-      The amount of ice is regulated by "tempered", by modifying min/max settings
-
-			The amount of desert & jungle and so on are set in output()
-      !!!TUNING, the table above is no longer correct. Update when tuning is done.
-	*/
 	int sea_min =  -14 * (100-tempered) / 100 + 2;
 	int sea_max = 20 * tempered / 100 + 20;
 	int land_min = -55 * (100-tempered) / 100 + 15;
@@ -1185,6 +1158,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
     If mapx is 256 and mapy is 64, we should have 4 times more waves
 		in the x direction, to preserve roundness. Exactly 4 times,
 		to avoid discontinuities.	Similar for 257,67...
+
+		ISO uses different tile layouts. To avoid wide flat continents,
+		consider that an ISO 3x6 world is square. 
 	*/
 	float mapy2 = mapy, mapx2 = mapx;
 	if (mapx > mapy) {
@@ -1420,8 +1396,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					ny2 = wrap(ny2+nb[way2].dy, mapy);
 					nx2 = wrap(nx2+nb[way2].dx, mapx);
 					ab->water -= 2*amount;
-					pushcloud(h1, nx1, ny1, amount, tile[nx1][ny1].height-seaheight, air);
-					pushcloud(h1, nx2, ny2, amount, tile[nx2][ny2].height-seaheight, air);
+					h1 = pushcloud(h1, nx1, ny1, amount, tile[nx1][ny1].height-seaheight, air);
+					h2 = pushcloud(h2, nx2, ny2, amount, tile[nx2][ny2].height-seaheight, air);
 				}
 			}
 		}
