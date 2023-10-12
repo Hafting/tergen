@@ -21,6 +21,9 @@ The end result is a somewhat realistic terrain. Much flat land, with occational 
 ## Compiling
 To compile, just run 'make'. 
 
+If you get error messages about missing sincosf(), compile with this command instead:
+gcc  -march=native -DINTERNAL_SINCOSF -O2 -lm -o tergen tergen.c
+
 ## Program usage
 ./tergen topology wrapping xsize ysize randomseed land% hillmountain% tempered% wateronland%
 

@@ -174,6 +174,25 @@ with wrap: round poles of some suitable size.
 
 #define log2(X) ((unsigned) (8*sizeof (unsigned long long) - __builtin_clzll((X)) - 1))
 
+
+#ifdef INTERNAL_SINCOSF
+/*
+	Apparently, some don't have sincosf
+	This implementation is no better than just calling sinf() and cosf()
+	Doing better is up to the math library vendor.
+
+	To use this, compile with -DINTERNAL_SINCOSF
+	 */
+void my_sincosf(float x, float *sinx, float *cosx) {
+	*sinx = sinf(x);
+	*cosx = cosf(x);
+}
+
+#define sincosf(a,b,c) my_sincosf(a,b,c)
+
+#endif
+
+
 typedef struct {
 	short height; //Meters above lowest sea bottom. Max 10000
 	char terrain; //Freeciv terrain letter
