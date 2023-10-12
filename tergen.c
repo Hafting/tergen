@@ -1241,11 +1241,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//Assign each tile to the nearest plate:
 	//correct only for square topology, probably "close enough" anyway
+	//correction for ISO
+	int isocorr = 1+ (topo & 1);
 	for (int x = mapx; x--;) for (int y = mapy; y--;) {
 		int best_plate = 0;
-		int best_sqdist = sqdist(x, y, plate[0].cx, plate[0].cy);
+		int best_sqdist = sqdist(x * isocorr, y, plate[0].cx * isocorr, plate[0].cy);
 		for (int p = plates; --p;) {
-			int dist = sqdist(x, y, plate[p].cx, plate[p].cy);
+			int dist = sqdist(x * isocorr, y, plate[p].cx * isocorr, plate[p].cy);
 			if (dist < best_sqdist) {
 				best_plate = p;
 				best_sqdist = dist;
