@@ -203,7 +203,7 @@ typedef struct {
 	char temperature; //in celsius
 	int wetness; //rainfall adds, evaporation subtracts
 	int waterflow; //amount in rivers. From rain, plus flow from other tiles
-	char oldflow; //log2 of prev. flow. Used for re-routing rivers
+	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
 	short rocks; //erosion, rocks following the rivers
 } tiletype;
 
@@ -1341,7 +1341,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			tiletype *t = &tile[x][y];
 			//Also reset steepness & waterflow for later steps;
 			t->steepness = -1;
-			t->oldflow = log2(t->waterflow);
+			//Fourth root of int will fit in a byte, and if
+			//a>b, then the same holds for the fourth roots.
+			t->oldflow = sqrtf(sqrtf(t->waterflow));
 			t->waterflow = 0;
 
 			int abovesea = t->height - seaheight;
