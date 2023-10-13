@@ -537,7 +537,10 @@ int sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weath
 
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
-	for (int i = 0; i < seatiles-1; ++i) tp[i]->terrain = ':';
+	for (int i = 0; i < seatiles-1; ++i) {
+		tp[i]->terrain = ':';
+		tp[i]->wetness = 0; //In case the tile surfaces later, avoid fake wetness
+	}
 	for (int i = seatiles; i < tilecnt; ++i) {
 		if (tp[i]->terrain == ':') tp[i]->terrain = 'm';
 	}
