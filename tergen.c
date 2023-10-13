@@ -248,6 +248,9 @@ int wrapmap; //0:no map wrap, 1: x-wrap 2:xy-wrap
 char *wraptxt[3] = {"", "WRAPX", "WRAPX|WRAPY"};
 char *topotxt[4] = {"", "ISO", "HEX", "ISO|HEX"};
 
+char paramtxt[1024]; //parameter list
+char *nametxt;
+
 int airheight[9] = {50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000};
 
 /*  odd & even neighbour arrays for the topologies  */
@@ -691,8 +694,8 @@ void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, 
 	fprintf(f, "[scenario]\n");
 	fprintf(f, "game_version=3000100\n");
 	fprintf(f, "is_scenario=TRUE\n");
-	fprintf(f, "name=\"Tergen\"\n");
-	fprintf(f, "description=\"Testing the tergen terrain generator\"\n");
+	fprintf(f, "name=\"%s\"\n", nametxt);
+	fprintf(f, "description=\"Made by the tergen terrain generator\\n\\nInvocation:\\n%s\"\n",paramtxt);
 	fprintf(f, "save_random=FALSE\n");
 	fprintf(f, "players=FALSE\n");
 	fprintf(f, "startpos_nations=FALSE\n");
@@ -1542,49 +1545,54 @@ int main(int argc, char **argv) {
 	mapx = 64; 
 	mapy = 128;
 	wrapmap = 2;
+	nametxt = "Tergen";
 	int land = 33, hillmountain = 30;
 	int tempered = 50, wateronland = 50;
 	topo = 3;
 	init_neighpos();
 	if (argc > MAXARGS) fail("Too many arguments.");
-	//tergen topology xsize ysize randseed land% hill% tempered% water%
+	//tergen name topology xsize ysize randseed land% hill% tempered% water%
 	switch (argc) {
 		//Fall through all the way, no breaks
-		case 10:
-			wateronland = atoi(argv[9]); //wetter terrain, more swamps and rivers. Or more deserts, fewer rivers
+		case 11:
+			wateronland = atoi(argv[10]); //wetter terrain, more swamps and rivers. Or more deserts, fewer rivers
 			percentcheck(wateronland);
-		case 9:
-			tempered = atoi(argv[8]); //50 is normal. balance between polar/tropic
+		case 10:
+			tempered = atoi(argv[9]); //50 is normal. balance between polar/tropic
 			percentcheck(tempered);
-		case 8:
-			hillmountain = atoi(argv[7]);
+		case 9:
+			hillmountain = atoi(argv[8]);
 			percentcheck(hillmountain);
-		case 7:
-			land = atoi(argv[6]);
+		case 8:
+			land = atoi(argv[7]);
 			percentcheck(land);
-		case 6: 
-			srandom(atoi(argv[5]));
-		case 5:
-			mapy = atoi(argv[4]);
+		case 7: 
+			srandom(atoi(argv[6]));
+		case 6:
+			mapy = atoi(argv[5]);
 			if (mapy < 16) fail("Bad map y size. >=16");
-		case 4:
-			mapx = atoi(argv[3]);
+		case 5:
+			mapx = atoi(argv[4]);
 			if (mapx < 16) fail("Bad map x size. >=16");
-		case 3:
-			wrapmap = atoi(argv[2]);
+		case 4:
+			wrapmap = atoi(argv[3]);
 			if (wrapmap < 0 || wrapmap > 2) fail("Bad map wrap. 0:no wrap, 1:x-wrap 2:xy-wrap");
-		case 2:
-			topo = atoi(argv[1]);
+		case 3:
+			topo = atoi(argv[2]);
 			if (topo < 0 || topo > 3) fail("Bad topology, must be 0-3.\n");
+		case 2:
+			nametxt = argv[1];
 		default:
+			printf("Map named \"%s\"\n", nametxt);
 			printf("Map size: %i × %i  Topology: %i (%s)\n", mapx, mapy, topo, topotxt[topo]);
 			printf("%3i%% land\n%3i%% mountains/hills\n", land, hillmountain);
 			printf("%3i%% tempered\n%3i%% water on land\n", tempered, wateronland);
 	}
 
 	if (argc == 1) {
-		printf("\nFor a different world:\ntergen topology wrap xsize ysize randomseed land%% hillmountain%% tempered%% wateronland%%\n");
+		printf("\nFor a different world:\ntergen name topology wrap xsize ysize randomseed land%% hillmountain%% tempered%% wateronland%%\n");
 		printf("specify as many parameters as needed\n\n");
+		printf("name - appears in the freeciv scenario list\n\n");
 		printf("topologies\n0 - squares\n1 - iso squares\n2 - hex\n3 - iso hex\n\n");
 		printf("wrap\n0 - no wrap, map has 4 edges\n1 - east/west wrap, top/bottom edges\n2 - wraparound in all directions, and round poles\n\n");
 	 	printf("Change randomseed for a different map with the same parameters.\n\n");
@@ -1596,6 +1604,12 @@ int main(int argc, char **argv) {
 		
 	}
 
+	//Keep the parameter list
+	paramtxt[0] = 0;
+	for (int  i = 0; i < argc ; ++i) {
+		strcat(paramtxt, argv[i]);
+		strcat(paramtxt, " ");
+	}
 
 	//The terrain:
 	tiletype tile[mapx][mapy];
