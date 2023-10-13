@@ -992,7 +992,7 @@ void find_wind(float latitude, int east, char *wind1, char *wind2, char *wstreng
 
 /*  Initialize weather data. Tile temperatures, atmosphere above them
 */
-void init_weather(tiletype tile[mapx][mapy], airboxtype air[9][mapx][mapy], weatherdata weather[mapx][mapy], int tempered) {
+void init_weather(tiletype tile[mapx][mapy], airboxtype air[mapx][mapy][9], weatherdata weather[mapx][mapy], int tempered) {
 	memset(air, 0, 9*mapx*mapy*sizeof(airboxtype));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
@@ -1103,9 +1103,9 @@ int cloudcapacity(int height, int groundheight, int groundtemp) {
 	Push a cloud somewhere. Go up, if the airbox is underground
 	Return whatever layer the cloud went to.
 	 */
-int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[9][mapx][mapy]) {
+int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[mapx][mapy][9]) {
 	while (airheight[h] < abovesea) ++h;
-	air[h][x][y].water += amount;
+	air[x][y][h].water += amount;
 	return h;
 
 }
@@ -1278,9 +1278,19 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		}
 	}
 
-	airboxtype air[9][mapx][mapy];
+	/* The commented-out fails for mapx=1000 and mapy=2000
+	airboxtype air[mapx][mapy][9];
 	weatherdata weather[mapx][mapy];
+	  do the equivalent heap allocation: */
+
+	weatherdata (*weather)[mapy];
+	weather = malloc(sizeof(*weather) * mapx);
+
+	airboxtype (*air)[mapy][9];
+	air = malloc(sizeof(*air) * mapx);
+
 	init_weather(tile, air, weather, tempered);
+
 
 	//print_platemap(tile); //dbg
 
@@ -1329,7 +1339,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			int airix = 0;
 			while (airheight[airix] < abovesea) ++airix;
-			airboxtype *ab = &air[airix][x][y];
+			airboxtype *ab = &air[x][y][airix];
 			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
 			if (cloudcap < 0) cloudcap = 0;
 			//found the cloud capacity over this tile. But do not evaporate over half of a land tile:
@@ -1352,13 +1362,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype *ab = &air[h][x][y];
+			airboxtype *ab = &air[x][y][h];
 
 			//move a fraction up to the layer above
 			if (h < 8) {
 				int rising = ab->water/10;
 				ab->water -= rising;
-				air[h+1][x][y].water += rising;
+				air[x][y][h+1].water += rising;
 			}
 
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
@@ -1416,7 +1426,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype *ab = &air[h][x][y];
+			airboxtype *ab = &air[x][y][h];
 			//Make a small amount of rain unconditionally
 			int rain = ab->water / 25;
 			ab->water -= rain;
@@ -1432,7 +1442,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				if (h > 0 && airheight[h-1] > abovesea) {
 					rain /= 2;
 					ab->water -= rain;
-					air[h-1][x][y].water += rain;
+					air[x][y][h-1].water += rain;
 				}
 			}
 		}
@@ -1526,7 +1536,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	fclose(f);
 }
 
-#define MAXARGS 10
+#define MAXARGS 11
 
 
 //Calculate some position offsets from hardcoded angles
@@ -1612,10 +1622,13 @@ int main(int argc, char **argv) {
 	}
 
 	//The terrain:
-	tiletype tile[mapx][mapy];
+	//tiletype tile[mapx][mapy]; //Stack allocation fails for [1000][2000]
 
+	tiletype (*tile)[mapy];
+	tile = malloc(sizeof(*tile) * mapx);
 	//Sortable array of pointers to tiles:
-	tiletype *tp[mapx*mapy];
+	//tiletype *tp[mapx*mapy];
+	tiletype **tp = malloc(mapx * mapy * sizeof(tiletype *));
 	{
 		int i = 0, x = mapx, y = mapy;
 		while (x--) for (y=mapy; y--;) tp[i++]=&(tile[x][y]);

@@ -1,0 +1,244 @@
+[scenario]
+game_version=3000100
+is_scenario=TRUE
+name="Miniworld"
+description="Made by the tergen terrain generator\n\nInvocation:\n./tergen Miniworld 2 1 16 16 747 35 25 70 70\n\nA small 16x16 world"
+save_random=FALSE
+players=FALSE
+startpos_nations=FALSE
+lake_flooding=TRUE
+ruleset_locked=TRUE
+ruleset_caps="+std-terrains"
+[savefile]
+options=" +version3"
+rulesetdir="civ2civ3"
+version=40
+reason="Scenario"
+revision="3.0.1"
+technology_size=88
+technology_vector="A_NONE","Advanced Flight","Alphabet","Amphibious Warfare","Astronomy","Atomic Theory","Automobile","Banking","Bridge Building","Bronze Working","Ceremonial Burial","Chemistry","Chivalry","Code of Laws","Combined Arms","Combustion","Communism","Computers","Conscription","Construction","Currency","Democracy","Economics","Electricity","Electronics","Engineering","Environmentalism","Espionage","Explosives","Feudalism","Flight","Fusion Power","Genetic Engineering","Guerilla Warfare","Gunpowder","Horseback Riding","Industrialization","Invention","Iron Working","Labor Union","Laser","Leadership","Literacy","Machine Tools","Magnetism","Map Making","Masonry","Mass Production","Mathematics","Medicine","Metallurgy","Miniaturization","Mobile Warfare","Monarchy","Monotheism","Mysticism","Navigation","Nuclear Fission","Nuclear Power","Philosophy","Physics","Plastics","Polytheism","Pottery","Radio","Railroad","Recycling","Refining","Refrigeration","Robotics","Rocketry","Sanitation","Seafaring","Space Flight","Stealth","Steam Engine","Steel","Superconductors","Tactics","The Corporation","The Republic","The Wheel","Theology","Theory of Gravity","Trade","University","Warrior Code","Writing"
+extras_size=34
+extras_vector="Irrigation","Mine","Oil Well","Pollution","Hut","Farmland","Fallout","Fortress","Airbase","Buoy","Ruins","Road","Railroad","River","Gold","Iron","Game","Furs","Coal","Fish","Fruit","Gems","Buffalo","Wheat","Oasis","Peat","Pheasant","Resources","Ivory","Silk","Spice","Whales","Wine","Oil"
+action_size=44
+action_vector="Establish Embassy","Establish Embassy Stay","Investigate City","Investigate City Spend Unit","Poison City","Poison City Escape","Steal Gold","Steal Gold Escape","Sabotage City","Sabotage City Escape","Targeted Sabotage City","Targeted Sabotage City Escape","Steal Tech","Steal Tech Escape Expected","Targeted Steal Tech","Targeted Steal Tech Escape Expected","Incite City","Incite City Escape","Establish Trade Route","Enter Marketplace","Help Wonder","Bribe Unit","Sabotage Unit","Sabotage Unit Escape","Capture Units","Found City","Join City","Steal Maps","Steal Maps Escape","Bombard","Suitcase Nuke","Suitcase Nuke Escape","Explode Nuclear","Destroy City","Expel Unit","Recycle Unit","Disband Unit","Home City","Upgrade Unit","Paradrop Unit","Airlift Unit","Attack","Conquer City","Heal Unit"
+action_decision_size=3
+action_decision_vector="nothing","passive","active"
+terrident={"name","identifier"
+"Inaccessible","i"
+"Lake","+"
+"Ocean"," "
+"Deep Ocean",":"
+"Glacier","a"
+"Desert","d"
+"Forest","f"
+"Grassland","g"
+"Hills","h"
+"Jungle","j"
+"Mountains","m"
+"Plains","p"
+"Swamp","s"
+"Tundra","t"
+}
+
+[game]
+server_state="S_S_INITIAL"
+meta_patches="none"
+meta_server="https://meta.freeciv.org/metaserver.php"
+id=""
+serverid=""
+phase_mode="Concurrent"
+phase_mode_stored="Concurrent"
+phase=0
+turn=0
+year=-4000
+year_0_hack=FALSE
+globalwarming=0
+heating=0
+warminglevel=8
+nuclearwinter=0
+cooling=0
+coolinglevel=8
+save_players=FALSE
+save_known=FALSE
+
+[random]
+saved=FALSE
+
+[script]
+code=$$
+vars=$$
+
+[settings]
+set={"name","value","gamestart"
+"topology","WRAPX|HEX","WRAPX|HEX"
+"xsize",16,16
+"ysize",16,16
+"generator","SCENARIO","RANDOM"
+}
+set_count=33
+gamestart_valid=FALSE
+
+[map]
+have_huts=FALSE
+have_resources=FALSE
+t0000=": aaaa ::aaaat :"
+t0001="  aaa :  aaat  :"
+t0002="ssft ::   tss   "
+t0003="m d ::  : ss sss"
+t0004="d ::::: :: jjjhj"
+t0005="::: ::  ::j     "
+t0006=":: gg::  :     :"
+t0007="::    +   gp  ::"
+t0008="::::: pgmmhgp ::"
+t0009=" ::: phdgdmhg  j"
+t0010="s::: shs  mhdssd"
+t0011="    dj :: hds  h"
+t0012="gg g  ::: ttf  g"
+t0013="  tm ::: aaas  p"
+t0014="  aaa :::aama  g"
+t0015=":aaata:: aaaaa  "
+startpos_count=0
+e00_0000="0000000000000000"
+e00_0001="0000000000000000"
+e00_0002="0000000000000000"
+e00_0003="0000000000000000"
+e00_0004="0000000000000000"
+e00_0005="0000000000000000"
+e00_0006="0000000000000000"
+e00_0007="0000000000000000"
+e00_0008="0000000000000000"
+e00_0009="0000000000000000"
+e00_0010="0000000000000000"
+e00_0011="0000000000000000"
+e00_0012="0000000000000000"
+e00_0013="0000000000000000"
+e00_0014="0000000000000000"
+e00_0015="0000000000000000"
+e01_0000="0000000000000000"
+e01_0001="0000000000000000"
+e01_0002="0000000000000000"
+e01_0003="0000000000000000"
+e01_0004="0000000000000000"
+e01_0005="0000000000000000"
+e01_0006="0000000000000000"
+e01_0007="0000000000000000"
+e01_0008="0000000000000000"
+e01_0009="0000000000000000"
+e01_0010="0000000000000000"
+e01_0011="0000000000000000"
+e01_0012="0000000000000000"
+e01_0013="0000000000000000"
+e01_0014="0000000000000000"
+e01_0015="0000000000000000"
+e02_0000="0000000000000000"
+e02_0001="0000000000000000"
+e02_0002="0000000000000000"
+e02_0003="0000000000000000"
+e02_0004="0000000000000000"
+e02_0005="0000000000000000"
+e02_0006="0000000000000000"
+e02_0007="0000000000000000"
+e02_0008="0000000000000000"
+e02_0009="0000000000000000"
+e02_0010="0000000000000000"
+e02_0011="0000000000000000"
+e02_0012="0000000000000000"
+e02_0013="0000000000000000"
+e02_0014="0000000000000000"
+e02_0015="0000000000000000"
+e03_0000="0000200000002200"
+e03_0001="0000000000022000"
+e03_0002="2020000000002000"
+e03_0003="0000000000220020"
+e03_0004="2000000000002000"
+e03_0005="0000000000000000"
+e03_0006="0000000000000000"
+e03_0007="0000000000200000"
+e03_0008="0000002200200000"
+e03_0009="0000020002000000"
+e03_0010="2000022000002020"
+e03_0011="0000000000022000"
+e03_0012="0002000000000002"
+e03_0013="0000000000200000"
+e03_0014="0000000000000000"
+e03_0015="0002200000000000"
+e04_0000="0000000000000000"
+e04_0001="0000000000000000"
+e04_0002="0000000000000000"
+e04_0003="0000000000000000"
+e04_0004="0000000000000000"
+e04_0005="0000000000000000"
+e04_0006="0000000000000000"
+e04_0007="0000000000000000"
+e04_0008="0000000000000000"
+e04_0009="0000000000000000"
+e04_0010="0000000000000000"
+e04_0011="0000000000000000"
+e04_0012="0000000000000000"
+e04_0013="0000000000000000"
+e04_0014="0000000000000000"
+e04_0015="0000000000000000"
+e05_0000="0000000000000000"
+e05_0001="0000000000000000"
+e05_0002="0000000000000000"
+e05_0003="0000000000000000"
+e05_0004="0000000000000000"
+e05_0005="0000000000000000"
+e05_0006="0000000000000000"
+e05_0007="0000000000000000"
+e05_0008="0000000000000000"
+e05_0009="0000000000000000"
+e05_0010="0000000000000000"
+e05_0011="0000000000000000"
+e05_0012="0000000000000000"
+e05_0013="0000000000000000"
+e05_0014="0000000000000000"
+e05_0015="0000000000000000"
+e06_0000="0000000000000000"
+e06_0001="0000000000000000"
+e06_0002="0000000000000000"
+e06_0003="0000000000000000"
+e06_0004="0000000000000000"
+e06_0005="0000000000000000"
+e06_0006="0000000000000000"
+e06_0007="0000000000000000"
+e06_0008="0000000000000000"
+e06_0009="0000000000000000"
+e06_0010="0000000000000000"
+e06_0011="0000000000000000"
+e06_0012="0000000000000000"
+e06_0013="0000000000000000"
+e06_0014="0000000000000000"
+e06_0015="0000000000000000"
+e07_0000="0000000000000000"
+e07_0001="0000000000000000"
+e07_0002="0000000000000000"
+e07_0003="0000000000000000"
+e07_0004="0000000000000000"
+e07_0005="0000000000000000"
+e07_0006="0000000000000000"
+e07_0007="0000000000000000"
+e07_0008="0000000000000000"
+e07_0009="0000000000000000"
+e07_0010="0000000000000000"
+e07_0011="0000000000000000"
+e07_0012="0000000000000000"
+e07_0013="0000000000000000"
+e07_0014="0000000000000000"
+e07_0015="0000000000000000"
+e08_0000="0000000000000000"
+e08_0001="0000000000000000"
+e08_0002="0000000000000000"
+e08_0003="0000000000000000"
+e08_0004="0000000000000000"
+e08_0005="0000000000000000"
+e08_0006="0000000000000000"
+e08_0007="0000000000000000"
+e08_0008="0000000000000000"
+e08_0009="0000000000000000"
+e08_0010="0000000000000000"
+e08_0011="0000000000000000"
+e08_0012="0000000000000000"
+e08_0013="0000000000000000"
+e08_0014="0000000000000000"
+e08_0015="0000000000000000"
