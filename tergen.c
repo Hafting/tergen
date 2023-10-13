@@ -508,7 +508,8 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
 		} else if (tile[x][y].river) {
 			//Remove rivers from the ice, unless they are on the ice edge
-			//Also remove rivers completely surrounded by other rivers
+			//Also remove rivers completely surrounded by other rivers,
+			//or almost surrounded. This does not disrupt the river system.
 			int icecnt = 0;
 			int rivercnt = 0;
 			for (int n = 0; n < neighbours[topo]; ++n) {
@@ -516,7 +517,7 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 				if (nbtile->terrain == 'a') ++icecnt;
 				rivercnt += nbtile->river;
 			}
-			if (icecnt == neighbours[topo] || rivercnt == neighbours[topo]) tile[x][y].river = 0;
+			if (icecnt == neighbours[topo] || rivercnt >= neighbours[topo]-1) tile[x][y].river = 0;
 		}
   }
 }
@@ -1112,7 +1113,8 @@ int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[mapx
 
 /*
 	Find next tile in a river flow. If there is nothing else, use the lowest neighbour.
-	If there is a neighbour river with more flow, merge into that instead, as long is it is on a lower tile.  Such coalescing improves the river systems a lot
+	If there is a neighbour river with more flow, merge into that instead, as long is it is on a lower tile.  Such coalescing improves the river systems a lot.
+	Running into the sea is preferred over merging into another river.
 	Also calculate steepness, based on the height difference between this tile and the outflow tile. Steepness is used for erosion, and for deciding how much of the wetness that leaves in the river.
 */
 void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheight) {
@@ -1136,10 +1138,14 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
 			flowlowheight = neigh->height;
 		}
 	}
-	if (flowlownb == -127) { //No lower tile with riverflow
+
+	//No lower tile with riverflow, or the sea is available:
+	if (flowlownb == -127 || lowheight <= seaheight) {
 		flowlownb = lownb; //use lowest neighbour instead
 		flowlowheight = lowheight;
 	}
+
+
 	tile[x][y].lowestneigh = flowlownb;
 
 	/* Don't use height difference underwater */
