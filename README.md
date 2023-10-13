@@ -25,9 +25,12 @@ If you get error messages about missing sincosf(), compile with this command ins
 gcc  -march=native -DINTERNAL_SINCOSF -O2 -lm -o tergen tergen.c
 
 ## Program usage
-./tergen topology wrapping xsize ysize randomseed land% hillmountain% tempered% wateronland%
+./tergen name topology wrapping xsize ysize randomseed land% hillmountain% tempered% wateronland%
 
 All parameters has defaults and may be omitted.
+### Name
+The name is stored in the generated file (tergen.sav), and will appear in the scenario list in the freeciv GUI.
+
 ### Topologies
 0 - square tiles
 
@@ -62,7 +65,7 @@ The program produces the file tergen.sav, which is a scenario file. Move it into
 To see all of a map without playing through the game first, use edit mode and become "global observer". 
 
 ## Some surprises
-* There may be deep water touching the coast, blocking triremes.  This is intentional. Some places are too rough for a trireme, you wouldn't want to go around Cape Horn in one. There are still lots of shallow water. Sometimes, rivers lets you get around a blocked coast. Sometimes, you can place a city strategically, connecting pieces of shallow water. Triremes are still useful, but you cannot sail them everywhere around the world. With time, you get better ships too.
+* There may be deep water touching the coast, blocking triremes.  This is intentional. Some places are too rough for a trireme, you wouldn't want to go around Cape Horn in one. There are still lots of shallow water. Sometimes, rivers lets you get around a blocked coast. Sometimes, you can place a city strategically, connecting pieces of shallow water. Triremes are still useful, but you cannot sail them everywhere around the world. With time, you get better ships.
 * You may find ice away from the poles. These tiles are glaciers. Temperature falls with height, so ice may happen in high places on islands some distance from the poles.
 * A few rivers don't go all the way to the sea. Usually, such a river ends in a lake like the dead sea instead. This does not happen often, but it is very hard to avoid.
 * The scenario file uses the civ2civ3 ruleset. If you want something else, open the file tergen.sav in a text editor (vim, notepad, ...) and change civ2civ3 to something else like civ1, civ2, multiplayer, sandbox or whatever you may have.
