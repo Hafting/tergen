@@ -1179,6 +1179,45 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
 	tile[x][y].steepness = (heightdiff <= 0) ? 0 : 1+log2(heightdiff);
 }
 
+/*
+	Called when a river gets stuck in a hole. It is known that all neighbours
+	have higher elevation – and the suggested way out is where the river
+	came in.
+	Check if there is a neighbour of a neighbour that is sea or lower elevation
+  than x,y.  If so, set newx,newy to the near neighbour, and flatten the near
+  neighbour	so the river may escape that way.
+	Return true on success, false on failure.
+*/
+bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *newy) {
+	short maxheight = tile[x][y].height - 2; // "-2" avoids loops, allow only strictly lower tiles
+	int mmx, mmy;
+	neighbourtype *nb0 = (y & 1) ? nodd[topo] : nevn[topo];
+	for (int n = 0; n < neighbours[topo]; ++n) {
+		int nx = wrap(x + nb0[n].dx, mapx);
+		int ny = wrap(y + nb0[n].dy, mapy);
+		neighbourtype *nb1 = (ny & 1) ? nodd[topo] : nevn[topo];
+		for (int m = 0; m < neighbours[topo]; ++m) {
+			int mx = wrap(nx + nb1[m].dx, mapx);
+			int my = wrap(ny + nb1[m].dy, mapy);
+			//Find the lowest neighbour of near neigbour
+			if (tile[mx][my].height < maxheight) {
+				maxheight = tile[mx][my].height;
+				*newx = nx;
+				*newy = ny;
+				mmx = mx;
+				mmy = my;
+			}
+		}
+	}
+	if (maxheight == tile[x][y].height - 2) return false; //Found nothing
+	//Break the dam
+	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
+	int rocks = tile[*newx][*newy].height - newheight;
+	tile[*newx][*newy].height = newheight;
+	tile[*newx][*newy].rocks = rocks;
+	return true;
+}
+
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Phase 1: initialization
 	
@@ -1498,8 +1537,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 			//More emphasis to rivers composed from several tiles, than a single large mountain
 			//looks better, and more rivers in cold regions
-			if (waterflow)  waterflow = 1 + log2(waterflow);
-
+			//			if (waterflow)  waterflow = 1 + log2(waterflow); 
+			if (waterflow) waterflow = sqrtf(sqrtf(waterflow)); //less agressive than log2
 			int prev_x = x, prev_y = y;
 			int pprevx = -1, pprevy = -1;
 			int rocks = 0;
@@ -1508,7 +1547,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (waterflow) do {
 				/* Move water to the lowest neighbour.
 					 if the lowest neighbour is higher up, this becomes a lake.
-					 If the lake's lowest neighbour is where the water came in, 
+					 If the lake's lowest neighbour is where the water came in,
+					 we're stuck. Attempt a dam break, if that doesn't work 
 					 give up and create the dead sea.
 				*/
 				neighbourtype *nb = (prev_y & 1) ? nodd[topo] : nevn[topo];
@@ -1540,7 +1580,23 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					t->height += drop;
 				}
 				if (nx == pprevx && ny == pprevy) {
-					break; //Give up reaching the sea, this lake must be the dead sea
+					/*
+						Loop detected. water is on tile prev_x, prev_y, and it came
+						in from pprevx,pprevy.  Unfortunately, the lowest neighbour
+						(nx,ny) for this tile is the same as pprevx,pprevy
+						so no progress is possible.
+
+						Check if we can break the dam. If some neighbour's neighbour
+						is sea or a lower elevation than t: reduce the neighbour's
+						height to between t and the neighbour's neighbour. Then, route
+						the river through the lowered neighbour.
+
+						The river continues on success, or creates a dead sea
+						on failure.
+					*/
+					if (!river_dambreak(prev_x, prev_y, tile, &nx, &ny)) break;
+					//A lower neighbour was created, this is no longer a lake
+					tile[prev_x][prev_y].terrain = 'm';
 				}
 				pprevx = prev_x; pprevy = prev_y; prev_x = nx; prev_y = ny; 
 				t = &tile[prev_x][prev_y];
@@ -1555,7 +1611,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			tiletype *t = &tile[x][y];
 			//More water moves more rocks. And more with more steepness
 			if (t->terrain == 'm') {
-				t->rocks = sqrt(t->waterflow * t->steepness);
+				t->rocks = sqrtf(sqrtf(t->waterflow * t->steepness));
 				t->height -= t->rocks;
 			}
 		}
