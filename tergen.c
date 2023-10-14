@@ -668,18 +668,39 @@ void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, 
 	//divide into desert, plain, grass, forest, jungle, swamp
 	qsort(tp+firsttempered, firsthill-firsttempered, sizeof(tiletype *), &q_compare_wetness);
 	int total = firsthill - firsttempered;
+#ifdef DBG
+	printf("First d wetness: %i\n", tp[j]->wetness);
+#endif
 	//int fifth = (firsthill-firsttempered) / 5;
 	limit = firsttempered + (d_part/partsum)*total;
 	for (; j < limit; ++j) set(&tp[j]->terrain, 'd');
+#ifdef DBG
+	printf("  First p wetness: %i\n", tp[j]->wetness);
+#endif
 	for (limit += (p_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'p');
+#ifdef DBG
+	printf("  First g wetness: %i\n", tp[j]->wetness);
+#endif	
 	for (limit += (g_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'g');
+#ifdef DBG
+	printf("First f/j wetness: %i\n", tp[j]->wetness);
+#endif
+
 	//Split the forests on temperature. The warmer part is jungle
 	int forest = fj_part/partsum * total;
 	qsort(tp + limit, forest, sizeof(tiletype *), &q_compare_temperature);
 	int firstswamp = limit + forest;
 	for (limit += f_part/partsum*total; j < limit; ++j) set(&tp[j]->terrain, 'f');
 	for (limit = firstswamp; j < limit; ++j) set(&tp[j]->terrain, 'j');
-	for (limit = firsthill; j < limit; ++j) set(&tp[j]->terrain, 's');	
+#ifdef DBG
+	printf("First s wetness: %i\n", tp[j]->wetness);
+#endif
+
+	for (limit = firsthill; j < limit; ++j) set(&tp[j]->terrain, 's');
+#ifdef DBG
+	printf(" Last s wetness: %i\n", tp[j-1]->wetness);
+#endif
+
 	//Assign the rivers
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
 	j = 0;
@@ -1099,8 +1120,8 @@ int airtemp(int height, int groundheight, int groundtemp) {
 //ground temperature
 int cloudcapacity(int height, int groundheight, int groundtemp) {
 	int atemp = airtemp(height, groundheight, groundtemp);
-	//Capacity at 50 celsius is arbitrarily set to 3000 "units" of water
-	return 3000 * powf(1.08, atemp-50);
+	//Capacity at 50 celsius is arbitrarily set to 100 000 "units" of water
+	return 100000 * powf(1.08, atemp-50);
 }
 
 /*
