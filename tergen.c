@@ -1517,6 +1517,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				t->rocks = 0;
 				int nx = wrap(prev_x + nb[t->lowestneigh].dx, mapx);
 				int ny = wrap(prev_y + nb[t->lowestneigh].dy, mapy);
+				//Is the lowest neighbour tile higher up?
 				if (tile[nx][ny].height >= t->height) {
 					t->terrain = '+'; //This is a hole, make a lake
 				}
@@ -1531,12 +1532,12 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 						rocks = excess/3;
 						t->height -= rocks;
 						t->terrain = 'm';
-					} else {
-						//Drop some rocks, depending on steepness
-						int drop = rocks / (t->steepness/4 + 2);
-						rocks -= drop;
-						t->height += drop;
 					}
+				} else {
+					//Drop some rocks, depending on steepness
+					int drop = rocks / (t->steepness/4 + 2);
+					rocks -= drop;
+					t->height += drop;
 				}
 				if (nx == pprevx && ny == pprevy) {
 					break; //Give up reaching the sea, this lake must be the dead sea
