@@ -605,19 +605,6 @@ Terrain assignment for normal freeciv tileset:
 4. Sort the forest on temperature, the hottest half is jungle
  
 
-Terrain assignment for extended tile set:
-1. Sort the tileset on height. 
-   The land percentage decides land/sea. 
-	 Sea is deep or shallow, depending on height
-	 Land is low, hill or mountain depending on height
-2. Sort the sea on temperature. Freeze all sea below T_SEAICE
-3. Sort the land on temperature. Sufficiently cold tiles become 
-   arctic, arctic hill, tundra or tundra hill. No change to mountains.
-4. Sort remaining land on wetness. Divide it into
-   desert, plain, grass, forest, and swamp   (lowland)
-   desert,  hill,  hill, forest, forest      (hill terrain)
-5. Sort the forest part on temperature, the hotter part is jungle instead
-
 Handling parameters "temperate" and "wateronland":
 
 "temperate" influence the temperature map, and therefore how much ice we get.
@@ -625,7 +612,7 @@ It also affect the amount of desert and the forest/jungle allocation. 50 is norm
 
 "wateronland" gives twice the percentage of river tiles. Actual number will be lower, because rivers merge to prevent ugly "river on every tile in the grid". Wateronland also affect the desert/swamp balance, and p/g allocation. 50 is normal
 */
-void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
+void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 	int i = mapx*mapy;
 	sealevel(tp, land, tile, weather); //Also sorts on height
 	int landtiles = land * i / 100;
@@ -642,7 +629,7 @@ void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, 
 
 	//These are parts, not percentages. They sum to 100 in the default case though
 	float d_part = 80.0 * tempered/100.0 * (100.0-wateronland)/100.0; // 0–80, 20 normal
-	float pg_part = 40.0;
+float pg_part = 40.0;
 	
 	float fj_part = 20.0;
 	float s_part = 40.0 * wateronland/100.0; //0–40, 20 normal
@@ -658,7 +645,7 @@ void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, 
 	int firsthill = seatiles + lowland;
 	limit = firsthill + hills;
 	for (j = firsthill; j < limit; ++j) {
-		if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
+if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 		else if (tp[j]->temperature < T_TUNDRA) set(&tp[j]->terrain, 't');
 		else set(&tp[j]->terrain, 'h');
 	}
@@ -820,7 +807,82 @@ void output(FILE *f, int land, int hillmountain, int tempered, int wateronland, 
 			fprintf(f, "\"\n");
 		}		
 	}
+}
 
+
+/*
+Terrain assignment for extended tile set:
+1. Sort the tileset on height. 
+   The land percentage decides land/sea. 
+	 Sea is deep or shallow, depending on height
+	 Cold sea tiles freeze to ice.
+	 Land is low, hill or mountain depending on height
+2. Sort the land on temperature. Sufficiently cold tiles become 
+   arctic, arctic hill, tundra or tundra hill. No change to mountains.
+3. Sort remaining land on wetness. Divide it into
+   desert, plain, grass, forest, and swamp   (lowland)
+   desert,  hill,  hill, forest, forest      (hill terrain)
+4. Sort the forest part on temperature, the hotter part is jungle instead
+*/
+void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
+	//Sort on height, determine sea level, correct tile temperatures
+	sealevel(tp, land, tile, weather);
+	int i = mapx * mapy;
+	int landtiles = land * i / 100;
+	int seatiles = i - landtiles;
+	int deepseatiles = 2 * seatiles / 3;
+	int highland = hillmountain * landtiles / 100;
+	int lowland = landtiles - highland;
+	int mountains = highland / 3;
+	int hills = highland - mountains;
+
+	int limit, j = 0;
+	//Deep sea or ice
+	for (; j < deepseatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
+	//Shallow sea or ice
+	for (; j < seatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
+	int firstland = j;
+	//Assign low land
+	for (limit = j + lowland; j < limit; ++j) set(&tp[j]->terrain, 'l');
+	//Assign hill land
+	for (limit = j + hills; j < limit; ++j) set(&tp[j]->terrain, 'h');
+	//Assign mountains
+	for (; j < i; ++j) set(&tp[j]->terrain, 'm');
+
+	//Sort land tiles on temperature, except mountains
+	qsort(tp + firstland, landtiles-mountains, sizeof(tiletype *), &q_compare_temperature);
+
+	//Assign arctic terrain types
+	for (j = firstland; tp[j]->temperature < T_GLACIER; ++j) switch (tp[j]->terrain) {
+		case '+':
+			continue;
+		case 'l':
+			tp[j]->terrain = 'a';
+			break;
+		case 'h':
+			tp[j]->terrain = 'A';
+			break;
+		default:
+			printf("Mysterious terrain type '%c'\n",tp[j]->terrain);
+			fail("Impossible 1.");
+	}
+	//Assign tundra terrain types
+	for (; tp[j]->temperature < T_TUNDRA; ++j) switch (tp[j]->terrain) {
+		case '+':
+			continue;
+		case 'l':
+			tp[j]->temperature = 't';
+			break;
+		case 'h':
+			tp[j]->temperature = 'T';
+			break;
+		default:
+			printf("Mysterious terrain type '%c'\n",tp[j]->terrain);
+			fail("Impossible 2.");
+	}
+	int firsttempered = j;
+	
+	//Sort tempered/tropic on wetness
 }
 
 //Ensures recursively that mountains stay below 10000m when plates collide.
@@ -1626,9 +1688,12 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	}
 
 	//print_platemap(tile); //dbg
-	//output(stdout, land, hillmountain, tempered, wateronland, tile, tp, weather); //screen dbg
 	FILE *f = fopen("tergen.sav", "w");
-	output(f, land, hillmountain, tempered, wateronland, tile, tp, weather);
+	if (!tileset) {
+		output0(f, land, hillmountain, tempered, wateronland, tile, tp, weather);
+	} else {
+		output1(f, land, hillmountain, tempered, wateronland, tile, tp, weather);
+	}
 	fclose(f);
 }
 
