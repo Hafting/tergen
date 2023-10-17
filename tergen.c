@@ -243,6 +243,8 @@ typedef struct {
 //Globals
 int mapx, mapy; //Map dimensions
 int topo; //map topology 0:square, 1:square iso, 2:hex, 3:hex iso
+int tileset; //0=normal. Otherwise, extended tileset toonhex+ where lowland
+             //tiles also have a hill form. (arctic hill, desert hill, ...)
 int wrapmap; //0:no map wrap, 1: x-wrap 2:xy-wrap
 
 char *wraptxt[3] = {"", "WRAPX", "WRAPX|WRAPY"};
@@ -590,7 +592,7 @@ void set(char *t, char ttyp) {
 
 //Assign freeciv terrain types, and output a freeciv map
 /*
-Terrain assignment:
+Terrain assignment for normal freeciv tileset:
 1. Sort the tileset on height. "land" is the percentage of land tiles, so we know land from sea
    Sea is divided into shallow and deep sea, based on height. 
 	 Sufficiently cold sea freeze to polar ice.
@@ -602,14 +604,19 @@ Terrain assignment:
 3. Sort the remaining on wetness, divide it into desert, plain, grass, forest and swamp
 4. Sort the forest on temperature, the hottest half is jungle
  
-   Missing tiletypes: 
-	 snowy mountain       Looks better in the arctic, otherwise like normal mountains
-	 desert mountain      Looks better (desert colors), otherwise like other mountains
-   snowy hill           Better for the arctic. Mineable like other hills
-	 desert hill          Rougher terrain in deserts, mineable.
-	 forest/jungle hill   Rougher terrain. Convertible to plain hill by removing trees
-   tundra hill          Rougher terrain in the tundra areas, mineable
 
+Terrain assignment for extended tile set:
+1. Sort the tileset on height. 
+   The land percentage decides land/sea. 
+	 Sea is deep or shallow, depending on height
+	 Land is low, hill or mountain depending on height
+2. Sort the sea on temperature. Freeze all sea below T_SEAICE
+3. Sort the land on temperature. Sufficiently cold tiles become 
+   arctic, arctic hill, tundra or tundra hill. No change to mountains.
+4. Sort remaining land on wetness. Divide it into
+   desert, plain, grass, forest, and swamp   (lowland)
+   desert,  hill,  hill, forest, forest      (hill terrain)
+5. Sort the forest part on temperature, the hotter part is jungle instead
 
 Handling parameters "temperate" and "wateronland":
 
@@ -1648,6 +1655,7 @@ int main(int argc, char **argv) {
 	int land = 33, hillmountain = 30;
 	int tempered = 50, wateronland = 50;
 	topo = 3;
+	tileset = 0;
 	init_neighpos();
 	if (argc > MAXARGS) fail("Too many arguments.");
 	//tergen name topology xsize ysize randseed land% hill% tempered% water%
@@ -1678,6 +1686,10 @@ int main(int argc, char **argv) {
 			if (wrapmap < 0 || wrapmap > 2) fail("Bad map wrap. 0:no wrap, 1:x-wrap 2:xy-wrap");
 		case 3:
 			topo = atoi(argv[2]);
+			if (topo >= 10) {
+				topo -= 10;
+				tileset = 1;
+			}
 			if (topo < 0 || topo > 3) fail("Bad topology, must be 0-3.\n");
 		case 2:
 			nametxt = argv[1];
@@ -1692,7 +1704,7 @@ int main(int argc, char **argv) {
 		printf("\nFor a different world:\ntergen name topology wrap xsize ysize randomseed land%% hillmountain%% tempered%% wateronland%%\n");
 		printf("specify as many parameters as needed\n\n");
 		printf("name - appears in the freeciv scenario list\n\n");
-		printf("topologies\n0 - squares\n1 - iso squares\n2 - hex\n3 - iso hex\n\n");
+		printf("topologies\n0 - squares\n1 - iso squares\n2 - hex\n3 - iso hex.\nAdd 10 for extended terrain features (requires a suitable tileset like toonhex+)\n\n");
 		printf("wrap\n0 - no wrap, map has 4 edges\n1 - east/west wrap, top/bottom edges\n2 - wraparound in all directions, and round poles\n\n");
 	 	printf("Change randomseed for a different map with the same parameters.\n\n");
 		printf("xsize, ysize  size of the map, in tiles. ISO trades height for width\n\n");
