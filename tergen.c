@@ -1688,7 +1688,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Make a small amount of rain unconditionally
 			int rain = *ab / 25;
 			*ab -= rain;
-			if (t->terrain != ':') t->wetness += rain; 
+			if (t->terrain != ':') t->wetness += rain;
 			//If the cloud has more water than it can hold,
 			//drop a large amount of it:
 			int cloudcap = cloudcapacity(airheight[h], abovesea, t->temperature);
@@ -1719,9 +1719,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			/*Less runoff from flat land, more from steeper, most from mountains. But not all.
 				Steepness from 0 to 14. 3/(7-steepness) yields 3/8, 3/7, 3/6, 3/5, 3/4
 				*/
-			int waterflow = 3*t->wetness / (7 - t->steepness/3);
+			int waterflow = 3*t->wetness / (7 - t->steepness/4);
 			t->wetness -= waterflow;
-
 			//More emphasis to rivers composed from several tiles, than a single large mountain
 			//looks better, and more rivers in cold regions
 			//			if (waterflow)  waterflow = 1 + log2(waterflow); 
