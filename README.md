@@ -6,7 +6,7 @@ The goal is realistic looking terrains for the freeciv game. The tergen program 
 ## How tergen works
 tergen initialize a height map, with some continents and islands. A couple of height averaging steps smooths this out, avoiding problems later on.
 
-Then plate tectonics is simulated. Some plates are created, with random center coordinates and direction of movement. Each tile is assigned to the closest plate, so the plates become convex polygons. After this, a 100 rounds of plate movement, where every plate may move up to 5 tiles in any direction. Where paltes move apart, rifts appear in the height map. Continents are sometimes torn apart. Where plates collide, mountain ranges are raised by adding up heightmap heights. Such ranges tend to follow plate boundaries.
+Then plate tectonics is simulated. Some plates are created, with random center coordinates and direction of movement. Each tile is assigned to the closest plate, so the plates become convex polygons. After this, a 100 rounds of plate movement, where every plate may move up to 5 tiles in any direction. Where plates move apart, rifts appear in the height map. Continents are sometimes torn apart. Where plates collide, mountain ranges are raised by adding up heightmap heights. Such ranges tend to follow plate boundaries.
 
 ## Weather simulation
 For each of the 100 turns of plate movement, weather is simulated. A temperature map is set up, where land and sea temperature depends on latitude and height. Neighbourhood averaging is used, so a cold land tile may freeze the sea around it close to the poles. Further from the poles, the sea may instead thaw a coast that would otherwise be frozen. 
@@ -41,6 +41,9 @@ The name is stored in the generated file (tergen.sav), and will appear in the sc
 3 - hex tiles, isometric
 
 Isometric seems to double the with and halve the height. Compensate by changing xsize and ysize
+
+Add 10 to use extended terrain features. The terrain may then have hills of many types, such as desert hills, polar hills and so on. There are also volcanoes. You will need a tileset and a ruleset providing such graphics; this is avaliable from my freecivstuff repository. 
+
 ### Wrap parameter
 0 - no wrap, the game map has 4 edges. Mercator style map, where the north and south edges are polar terrain, and equator follows the middle of the map.
 
@@ -61,11 +64,11 @@ The tempered parameter defaults to 50. Decrease to get more polar terrain, incre
 
 The wateronland parameter decides how wet the terrain will be. Increase to get more swamps, forests and rivers. Decrease to get fewer rivers and more desert.
 ## Use the produced map
-The program produces the file tergen.sav, which is a scenario file. Move it into your scenario folder. On Linux, this is ~/.freeciv/scenarios/  Then, start a scenario from the game menu. "Tergen" should be one of the alternatives.
+The program produces the file tergen.sav, which is a scenario file. Move it into your scenario folder. On Linux, this is ~/.freeciv/scenarios/  Then, start a scenario from the game menu. The name you gave your scenario should be one of the alternatives.
 To see all of a map without playing through the game first, use edit mode and become "global observer". 
 
 ## Some surprises
 * There may be deep water touching the coast, blocking triremes.  This is intentional. Some places are too rough for a trireme, you wouldn't want to go around Cape Horn in one. There are still lots of shallow water. Sometimes, rivers lets you get around a blocked coast. Sometimes, you can place a city strategically, connecting pieces of shallow water. Triremes are still useful, but you cannot sail them everywhere around the world. With time, you get better ships.
-* You may find ice away from the poles. These tiles are glaciers. Temperature falls with height, so ice may happen in high places on islands some distance from the poles.
-* A few rivers don't go all the way to the sea. Usually, such a river ends in a lake like the dead sea instead. This does not happen often, but it is very hard to avoid.
+* You may find ice away from the poles. These tiles are glaciers. Temperature falls with height, so ice may happen in high places some distance from the poles.
+* A few rivers don't go all the way to the sea. Usually, such a river ends in a lake like the dead sea instead. This does not happen often on maps with enough sea, but it is very hard to avoid completely.
 * The scenario file uses the civ2civ3 ruleset. If you want something else, open the file tergen.sav in a text editor (vim, notepad, ...) and change civ2civ3 to something else like civ1, civ2, multiplayer, sandbox or whatever you may have.
