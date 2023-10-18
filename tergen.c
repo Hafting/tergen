@@ -503,7 +503,7 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 		} else if (t->terrain == 'v') for (n = 0; n < neighcount; ++n) { //Volcanoes
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
-			if (tile[nx][ny].terrain == 'm' && (random() & 7 == 0)) tile[nx][ny].terrain = 'v';
+			if (tile[nx][ny].terrain == 'm' && (random() & 7) == 0) tile[nx][ny].terrain = 'v';
 		}
 	}
 
@@ -519,12 +519,13 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 				t->terrain = ' '; //Make it shallow
 				//Convert to lake, if a small piece of sea is trapped:
 				start_dfs_lake(x, y, tile);
-			}
+			} else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Trireme benefit
 		} else if (t->terrain == '+') {
 			//Find lakes connecting to the sea, change to shallow sea
 			//Occurs because of land sinking or eroding
 			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
 		} else if (t->terrain == 'v') {
+			t->river = 0; //River ON the volcano looks weird. 
 			//Volcanoes fertilize terrain around them, so convert to food terrain
 			//Also melt ice
 			for (n = 0; n < neighcount; ++n) {
@@ -574,21 +575,21 @@ int sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weath
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
 	int landtiles = land * tilecnt / 100;
 	int seatiles = tilecnt - landtiles;
-	int level = tp[seatiles-1]->height;
+	int level = tp[seatiles ? seatiles-1 : 0]->height;
 
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
 	for (int i = 0; i < seatiles-1; ++i) {
 		tp[i]->terrain = ':';
-		tp[i]->wetness = 0; //In case the tile surfaces later, avoid fake wetness
+		tp[i]->wetness = 1000; //In case the tile surfaces later, avoid too much fake wetness
 	}
 	for (int i = seatiles; i < tilecnt; ++i) {
-		if (tp[i]->terrain == ':') tp[i]->terrain = 'm';
+		if (tp[i]->terrain != '+') tp[i]->terrain = 'm';
 	}
-	//temperatures. Land temperatures fall with elevation
+	//temperatures. Land temperatures fall with elevation. About 10C per km up
   for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		if (tile[x][y].terrain == ':') tile[x][y].temperature = weather[x][y].sea_temp;
-		else tile[x][y].temperature = weather[x][y].land_temp - (tile[x][y].height-level)/111;
+		else tile[x][y].temperature = weather[x][y].land_temp - (tile[x][y].height-level)/100;
 	}
 	//two rounds of averaging. Sea may thaw frozen land, land may freeze some sea.
 	signed char tmptemp[mapx][mapy];
@@ -892,6 +893,8 @@ Terrain assignment for extended tile set:
    desert, plain, grass, forest, and swamp   (lowland)
    desert,  hill,  hill, forest, forest      (hill terrain)
 4. Sort the forest part on temperature, the hotter part is jungle instead
+
+Didn't work well. Most hills became deserts. Bug in rain?
 */
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 
@@ -947,19 +950,27 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 #endif
 	//Assign deserts (flat+hills)
 	limit = firsttempered + (d_part/partsum) * total;
-	for (; j < limit; ++j) set_tile(tp[j], 'd', 'D');
+	for (; j < limit; ++j) {
+		set_tile(tp[j], 'd', 'D');
+		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
+	}
 #ifdef DBG
 	printf("%i ph plain/hill tiles\n", (int)(p_part/partsum*total));
 #endif
 	//Assign plains & hills
-	for (limit += (p_part/partsum)*total; j < limit; ++j) set_tile(tp[j], 'p', 'h');
+	for (limit += (p_part/partsum)*total; j < limit; ++j) {
+		set_tile(tp[j], 'p', 'h');
+		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
+	}
 
 #ifdef DBG
 	printf("%i gh grass/hill tiles\n", (int)(g_part/partsum*total));
 #endif
 	//Assign grassland & hills
-	for (limit += (g_part/partsum)*total; j < limit; ++j) set_tile(tp[j], 'g', 'h');
-
+	for (limit += (g_part/partsum)*total; j < limit; ++j) {
+		set_tile(tp[j], 'g', 'h');
+		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
+	}
 	//Forests & forested hills. Sort on temperature, separating out jungle/jungle hills
 	limit += (f_part+j_part) / partsum * total;
 	qsort(tp + j, limit - j, sizeof(tiletype *), &q_compare_temperature); 
@@ -971,7 +982,10 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	//Hills are too steep to be swampy, the water runs off. So, forest/jungle instead.
 	qsort(tp + j, i-j - mountains, sizeof(tiletype *), &q_compare_temperature);
 	flimit = j + s_part/partsum * total * (f_part/(f_part+j_part));
-	for (; j < flimit; ++j) set_tile(tp[j], 's', 'F');
+	for (; j < flimit; ++j) {
+		set_tile(tp[j], 's', 'F');
+		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
+	}
 	limit = i - mountains;
 	for (; j < limit; ++j) set_tile(tp[j], 's', 'J');
 
@@ -1287,8 +1301,8 @@ int airtemp(int height, int groundheight, int groundtemp) {
 //ground temperature
 int cloudcapacity(int height, int groundheight, int groundtemp) {
 	int atemp = airtemp(height, groundheight, groundtemp);
-	//Capacity at 50 celsius is arbitrarily set to 100 000 "units" of water
-	return 100000 * powf(1.08, atemp-50);
+	//Capacity at 50 celsius is arbitrarily set to 1 000 000 "units" of water
+	return 1000000 * powf(1.08, atemp-50);
 }
 
 /*
@@ -1299,7 +1313,6 @@ int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[mapx
 	while (airheight[h] < abovesea) ++h;
 	air[x][y][h].water += amount;
 	return h;
-
 }
 
 /*
@@ -1366,8 +1379,11 @@ bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *new
 		for (int m = 0; m < neighbours[topo]; ++m) {
 			int mx = wrap(nx + nb1[m].dx, mapx);
 			int my = wrap(ny + nb1[m].dy, mapy);
-			//Find the lowest neighbour of near neigbour
-			if (tile[mx][my].height < maxheight) {
+			//Find the lowest neighbour of near neigbour.
+			//There may be more than one near neighbour, prefer
+			//flattening the lowest one.
+			if (tile[mx][my].height < maxheight || 
+					(tile[mx][my].height == maxheight && tile[nx][ny].height < tile[*newx][*newy].height)) {
 				maxheight = tile[mx][my].height;
 				*newx = nx;
 				*newy = ny;
@@ -1376,7 +1392,7 @@ bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *new
 			}
 		}
 	}
-	if (maxheight == tile[x][y].height - 2) return false; //Found nothing
+	if (maxheight == tile[x][y].height - 2) return false; //Found no way out.
 	//Break the dam
 	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
 	int rocks = tile[*newx][*newy].height - newheight;
@@ -1436,7 +1452,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 		//High frequency noise, more variation:
 		float h3 =  sinf(fxb*13+frndy)*sinf(fyb*13+frndx);
-		tile[x][y].height = 4000 + 1000*h1 + 1400*h2 + 1000*h3*h2; // 600..7400
+//		tile[x][y].height = 4000 + 1000*h1 + 1400*h2 + 1000*h3*h2; // 600..7400
+		tile[x][y].height = 2000 + 500*h1 + 700*h2 + 500*h3*h2; // 300..3700
 	}
 
 	//2 rounds of neighbourhood height averaging.  Improves chances of shallow sea near land,
@@ -1517,7 +1534,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	/* The commented-out fails for mapx=1000 and mapy=2000
 	airboxtype air[mapx][mapy][9];
 	weatherdata weather[mapx][mapy];
-	  do the equivalent heap allocation: */
+	  do the equivalent heap allocation: 
+	 Therefore, more complicated allocation of large arrays:
+	 */
 
 	weatherdata (*weather)[mapy];
 	weather = malloc(sizeof(*weather) * mapx);
@@ -1560,7 +1579,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			}
 		}
 		/* Run weather & erosion */
-//printf("weather, round %i\n",i);
+#ifdef DBG		
+		printf("weather, round %i\n",i);
+#endif
 		//Terrain changed last round, recompute land/sea and sea level
 		int seaheight = sealevel(tp, land, tile, weather);
 		//Evaporate water from all tiles, deposit into air above
@@ -1580,9 +1601,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			airboxtype *ab = &air[x][y][airix];
 			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
 			if (cloudcap < 0) cloudcap = 0;
-			//found the cloud capacity over this tile. But do not evaporate over half of a land tile:
+			//found the cloud capacity over this tile. But do not evaporate too much of a land tile:
 			if (t->terrain == 'm') {
-			 	if (t->wetness/2 < cloudcap) cloudcap = t->wetness/2;
+			 	if (t->wetness/3 < cloudcap) cloudcap = t->wetness/3;
 			}
 			//Evaporate
 			ab->water += cloudcap;
@@ -1595,12 +1616,12 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		for (int h=0; h < 9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 
 			//skip airboxes that are underground:
-			tiletype *t = &tile[x][y];
+			tiletype * const t = &tile[x][y];
 			int abovesea = t->height - seaheight;
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype *ab = &air[x][y][h];
+			airboxtype * const ab = &air[x][y][h];
 
 			//move a fraction up to the layer above
 			if (h < 8) {
@@ -1626,7 +1647,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			}
 
 			//scatter some clouds in random directions
-			//More if there is less prevailing winds.
+			//More if there are less prevailing winds.
 			for (int reps = 3-weather[x][y].prevailing_strength; reps--;) {
 				int way = random() % neighbours[topo];
 				ab->water -= amount;
@@ -1659,23 +1680,23 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		//Let the clouds rain, wetting the ground
 		for (int h = 0; h<9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			//Skip airboxes that are underground:
-			tiletype *t = &tile[x][y];
+			tiletype * const t = &tile[x][y];
 			int abovesea = t->height - seaheight;
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype *ab = &air[x][y][h];
+			airboxtype * const ab = &air[x][y][h];
 			//Make a small amount of rain unconditionally
 			int rain = ab->water / 25;
 			ab->water -= rain;
-			if (t->terrain == 'm') t->wetness += rain; 
+			if (t->terrain != ':') t->wetness += rain; 
 			//If the cloud has more water than it can hold,
 			//drop a large amount of it:
 			int cloudcap = cloudcapacity(airheight[h], abovesea, t->temperature);
 			if (cloudcap < ab->water) {
 				int rain = (ab->water - cloudcap) / 3;
 				ab->water -= rain;
-				t->wetness += rain;
+				if (t->terrain != ':') t->wetness += rain;
 				//Migrate som water to a lower cloud layer too, for better rain shadow effects
 				if (h > 0 && airheight[h-1] > abovesea) {
 					rain /= 2;
