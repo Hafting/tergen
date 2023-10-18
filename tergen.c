@@ -551,7 +551,8 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 		} else if (t->river) {
 			//Remove rivers from the ice, unless they are on the ice edge
 			//Also remove rivers completely surrounded by other rivers,
-			//or almost surrounded. This does not disrupt the river system.
+			//or almost surrounded. This does not disrupt the river system,
+			//but avoids ugly river grids.
 			int icecnt = 0;
 			int rivercnt = 0;
 			for (int n = 0; n < neighbours[topo]; ++n) {
@@ -1301,8 +1302,8 @@ int airtemp(int height, int groundheight, int groundtemp) {
 //ground temperature
 int cloudcapacity(int height, int groundheight, int groundtemp) {
 	int atemp = airtemp(height, groundheight, groundtemp);
-	//Capacity at 50 celsius is arbitrarily set to 1 000 000 "units" of water
-	return 1000000 * powf(1.08, atemp-50);
+	//Capacity at 50 celsius is arbitrarily set to 50 000 "units" of water
+	return 50000 * powf(1.08, atemp-50);
 }
 
 /*
