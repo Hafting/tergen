@@ -215,12 +215,12 @@ typedef struct {
 	char prevailing2; //second prevailing wind direction
 	char prevailing_strength; //1, 2, 3
 } weatherdata;
-
-
+/*
+//Simple weather simulation need only one parameter, 
+//the water content in a volume of air.
 typedef struct {
-	char temperature;
 	int water;
-} airboxtype;
+} int;*/
 //Air layers: 50m, 100m, 200m, 500m, 1000m, 2000m, 5000m, 10000m, 20000m
 
 typedef struct {
@@ -1198,8 +1198,8 @@ void find_wind(float latitude, int east, char *wind1, char *wind2, char *wstreng
 
 /*  Initialize weather data. Tile temperatures, atmosphere above them
 */
-void init_weather(tiletype tile[mapx][mapy], airboxtype air[mapx][mapy][9], weatherdata weather[mapx][mapy], int tempered) {
-	memset(air, 0, 9*mapx*mapy*sizeof(airboxtype));
+void init_weather(tiletype tile[mapx][mapy], int air[mapx][mapy][9], weatherdata weather[mapx][mapy], int tempered) {
+	memset(air, 0, 9*mapx*mapy*sizeof(int));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
 		t->wetness = t->waterflow = 0;
@@ -1309,9 +1309,9 @@ int cloudcapacity(int height, int groundheight, int groundtemp) {
 	Push a cloud somewhere. Go up, if the airbox is underground
 	Return whatever layer the cloud went to.
 	 */
-int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[mapx][mapy][9]) {
+int pushcloud(int h, int x, int y, int amount, int abovesea, int air[mapx][mapy][9]) {
 	while (airheight[h] < abovesea) ++h;
-	air[x][y][h].water += amount;
+	air[x][y][h] += amount;
 	return h;
 }
 
@@ -1532,7 +1532,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	}
 
 	/* The commented-out fails for mapx=1000 and mapy=2000
-	airboxtype air[mapx][mapy][9];
+	int air[mapx][mapy][9];
 	weatherdata weather[mapx][mapy];
 	  do the equivalent heap allocation: 
 	 Therefore, more complicated allocation of large arrays:
@@ -1541,7 +1541,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	weatherdata (*weather)[mapy];
 	weather = malloc(sizeof(*weather) * mapx);
 
-	airboxtype (*air)[mapy][9];
+	int (*air)[mapy][9];
 	air = malloc(sizeof(*air) * mapx);
 
 	init_weather(tile, air, weather, tempered);
@@ -1598,21 +1598,20 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			int airix = 0;
 			while (airheight[airix] < abovesea) ++airix;
-			airboxtype *ab = &air[x][y][airix];
-			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
+			int *ab = &air[x][y][airix];
+			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - *ab;
 			if (cloudcap < 0) cloudcap = 0;
 			//found the cloud capacity over this tile. But do not evaporate too much of a land tile:
 			if (t->terrain == 'm') {
 			 	if (t->wetness/3 < cloudcap) cloudcap = t->wetness/3;
 			}
 			//Evaporate
-			ab->water += cloudcap;
+			*ab += cloudcap;
 			if (t->terrain == 'm') t->wetness -= cloudcap;
 		}
 
 		//Move clouds using prevailing winds, random winds & sea breeze
-		//A cloud hitting a mountain moves up instead - it will then move
-		//when the layer above moves.
+		//A cloud hitting a mountain moves up as well
 		for (int h=0; h < 9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 
 			//skip airboxes that are underground:
@@ -1621,26 +1620,26 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype * const ab = &air[x][y][h];
+			int * const ab = &air[x][y][h];
 
 			//move a fraction up to the layer above
 			if (h < 8) {
-				int rising = ab->water/10;
-				ab->water -= rising;
-				air[x][y][h+1].water += rising;
+				int rising = *ab/10;
+				*ab -= rising;
+				air[x][y][h+1] += rising;
 			}
 
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 
 
-			//sea breeze for air layer 0, sea/lake tiles
-			int amount = ab->water / 16;
-			if (h == 0 && t->terrain != 'm') {
+			//sea breeze for lowest air layer, sea/lake tiles
+			int amount = *ab / 16;
+			if ( (t->terrain != 'm') && ( h == 0 || airheight[h-1] < abovesea) ) {
 				for (int n = 0; n < neighbours[topo]; ++n) {
 					int nx = wrap(x + nb[n].dx, mapx);
 					int ny = wrap(y + nb[n].dy, mapy);
 					if (tile[nx][ny].terrain == 'm') {
-						ab->water -= amount;
+						*ab -= amount;
 						pushcloud(h, nx, ny, amount, tile[nx][ny].height-seaheight, air);
 					}
 				}
@@ -1650,7 +1649,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//More if there are less prevailing winds.
 			for (int reps = 3-weather[x][y].prevailing_strength; reps--;) {
 				int way = random() % neighbours[topo];
-				ab->water -= amount;
+				*ab -= amount;
 				int nx = wrap(x+nb[way].dx, mapx);
 				int ny = wrap(y+nb[way].dy, mapy);
 				pushcloud(h, nx, ny, amount, tile[nx][ny].height-seaheight, air);
@@ -1662,7 +1661,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				int h1 = h, h2 = h, reps = weather[x][y].prevailing_strength;
 				char way1 = weather[x][y].prevailing1;
 				char way2 = weather[x][y].prevailing2;
-				amount = ab->water / 3 / reps;
+				amount = *ab / 3 / reps;
 				while (reps--) {
 					nb = (ny1 & 1) ? nodd[topo] : nevn[topo];
 					ny1 = wrap(ny1+nb[way1].dy, mapy);
@@ -1670,7 +1669,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					nb = (ny2 & 1) ? nodd[topo] : nevn[topo];
 					ny2 = wrap(ny2+nb[way2].dy, mapy);
 					nx2 = wrap(nx2+nb[way2].dx, mapx);
-					ab->water -= 2*amount;
+					*ab -= 2*amount;
 					h1 = pushcloud(h1, nx1, ny1, amount, tile[nx1][ny1].height-seaheight, air);
 					h2 = pushcloud(h2, nx2, ny2, amount, tile[nx2][ny2].height-seaheight, air);
 				}
@@ -1685,26 +1684,26 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (abovesea < 0) abovesea = 0;
 			if (airheight[h] < abovesea) continue;
 
-			airboxtype * const ab = &air[x][y][h];
+			int * const ab = &air[x][y][h];
 			//Make a small amount of rain unconditionally
-			int rain = ab->water / 25;
-			ab->water -= rain;
+			int rain = *ab / 25;
+			*ab -= rain;
 			if (t->terrain != ':') t->wetness += rain; 
 			//If the cloud has more water than it can hold,
 			//drop a large amount of it:
 			int cloudcap = cloudcapacity(airheight[h], abovesea, t->temperature);
-			if (cloudcap < ab->water) {
-				int rain = (ab->water - cloudcap) / 3;
-				ab->water -= rain;
+			if (cloudcap < *ab) {
+				int rain = (*ab - cloudcap) / 3;
+				*ab -= rain;
 				if (t->terrain != ':') t->wetness += rain;
 				//Migrate som water to a lower cloud layer too, for better rain shadow effects
 				if (h > 0 && airheight[h-1] > abovesea) {
-					rain /= 2;
-					ab->water -= rain;
-					air[x][y][h-1].water += rain;
+					*ab -= rain;
+					air[x][y][h-1] += rain;
 				}
 			}
 		}
+		
 
 		//Let some ground wetness run off in rivers. A steep tile
 		//drains faster than one in flat terrain. (height difference to lowest neighbour)
