@@ -396,11 +396,20 @@ int q_compare_temperature(void const *p1, void const *p2) {
 	return tp1->temperature - tp2->temperature;
 }
 
-
+//Test for deep or shallow sea
 bool is_sea(char c) {
 	return c == ' ' || c == ':';
 }
 
+//Test for arctic terrain. 
+bool is_arctic(char c) {
+	return c == 'a' || c == 'A';
+}
+
+//Test for mountain
+bool is_mountain(char c) {
+	return c == 'm' || c == 'v';
+}
 
 //counts sea neighbours around [x][y].  The central tile is not counted
 int seacount(int x, int y, tiletype tile[mapx][mapy]) {
@@ -469,46 +478,76 @@ void lake_to_sea(int x, int y, tiletype tile[mapx][mapy]) {
 		 - river in the ice removed, unless there is a non-arctic neighbour (ice edge may have river)
 	 */
 void terrain_fixups(tiletype tile[mapx][mapy]) {
-	//Get rid of single-tile islands, except arctic.
+	//Get rid of single-tile islands, except unbuildable ones.
+	//volcanoes may spread to a neighbour mountain
 	int const neighcount = neighbours[topo];
 	int n;
 
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+		tiletype *const t = &tile[x][y];
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-		if (!is_sea(tile[x][y].terrain) && tile[x][y].terrain != 'a') {
+		if (!is_sea(t->terrain) && !is_arctic(t->terrain) && !is_mountain(t->terrain)) {
 			for (n = 0; n < neighcount; ++n) if (!is_sea(tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)].terrain)) break;
 			if (n == neighcount) {
 				//Double the island, or drown it. Either way avoids single tile islands
 				int num = random() % (neighcount*2);
 				if (num >= neighcount) {
-					tile[x][y].terrain = ' '; //Drown the island
-					tile[x][y].river = 0;
+					t->terrain = ' '; //Drown the island
+					t->river = 0;
 				} else {
 					int nx = wrap(x+nb[num].dx, mapx);
 					int ny = wrap(y+nb[num].dy, mapy);
-					tile[nx][ny].terrain = tile[x][y].terrain; //Raise some neighbour
+					tile[nx][ny].terrain = t->terrain; //Raise some neighbour
 				}
 			}
+		} else if (t->terrain == 'v') for (n = 0; n < neighcount; ++n) { //Volcanoes
+			int nx = wrap(x+nb[n].dx, mapx);
+			int ny = wrap(y+nb[n].dy, mapy);
+			if (tile[nx][ny].terrain == 'm' && (random() & 7 == 0)) tile[nx][ny].terrain = 'v';
 		}
 	}
 
   for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+	  tiletype * const t = &tile[x][y];
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-		if (is_sea(tile[x][y].terrain)) {
+		if (is_sea(t->terrain)) {
 			//Find deep sea next to land, and small lakes
 			int seacnt = seacount(x, y, tile);
 			int landcnt = neighcount - seacnt;
-			if (seacnt == 0) tile[x][y].terrain = '+'; //Single-tile sea->lake
+			if (seacnt == 0) t->terrain = '+'; //Single-tile sea->lake
 			else if (landcnt >= 2) {
-				tile[x][y].terrain = ' '; //Make it shallow
+				t->terrain = ' '; //Make it shallow
 				//Convert to lake, if a small piece of sea is trapped:
 				start_dfs_lake(x, y, tile);
 			}
-		} else if (tile[x][y].terrain == '+') {
+		} else if (t->terrain == '+') {
 			//Find lakes connecting to the sea, change to shallow sea
-			//Occur because of land sinking or eroding
+			//Occurs because of land sinking or eroding
 			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
-		} else if (tile[x][y].river) {
+		} else if (t->terrain == 'v') {
+			//Volcanoes fertilize terrain around them, so convert to food terrain
+			//Also melt ice
+			for (n = 0; n < neighcount; ++n) {
+				int nx = wrap(x+nb[n].dx, mapx);
+				int ny = wrap(y+nb[n].dy, mapy);
+				tiletype * const tnb = &tile[nx][ny];
+				switch(tnb->terrain) {
+					case 'A':
+						tnb->terrain = 'T';
+						break;
+					case 'a': 
+						tnb->terrain = 't';
+						break;
+					case 'p':
+						tnb->terrain = 'g';
+						break;
+					case 's':
+						tnb->terrain = 'g';
+						break;
+				}
+			}
+
+		} else if (t->river) {
 			//Remove rivers from the ice, unless they are on the ice edge
 			//Also remove rivers completely surrounded by other rivers,
 			//or almost surrounded. This does not disrupt the river system.
@@ -516,10 +555,10 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 			int rivercnt = 0;
 			for (int n = 0; n < neighbours[topo]; ++n) {
 				tiletype *nbtile = &tile[wrap(x+nb[n].dx,mapx)][wrap(y+nb[n].dy,mapy)];
-				if (nbtile->terrain == 'a') ++icecnt;
+				if (is_arctic(nbtile->terrain)) ++icecnt;
 				rivercnt += nbtile->river;
 			}
-			if (icecnt == neighbours[topo] || rivercnt >= neighbours[topo]-1) tile[x][y].river = 0;
+			if (icecnt == neighbours[topo] || rivercnt >= neighbours[topo]-1) t->river = 0;
 		}
   }
 }
@@ -586,118 +625,22 @@ void set(char *t, char ttyp) {
 	*t = ttyp;
 }
 
-#define T_SEAICE -1
-#define T_GLACIER -6
-#define T_TUNDRA 2
-
-//Assign freeciv terrain types, and output a freeciv map
-/*
-Terrain assignment for normal freeciv tileset:
-1. Sort the tileset on height. "land" is the percentage of land tiles, so we know land from sea
-   Sea is divided into shallow and deep sea, based on height. 
-	 Sufficiently cold sea freeze to polar ice.
-	 The highest land tiles become mountains or hills depending on height and given percentages
-	 Sufficiently cold hills becomes ice or tundra instead.
-	 Remaining tiles are flat land
-2. Sort the flat land on temperature. Freeze the coldest to ice or tundra, leave the rest.
-   The arctic is now done, the rest is tempered or tropic. It is also flat.
-3. Sort the remaining on wetness, divide it into desert, plain, grass, forest and swamp
-4. Sort the forest on temperature, the hottest half is jungle
- 
-
-Handling parameters "temperate" and "wateronland":
-
-"temperate" influence the temperature map, and therefore how much ice we get.
-It also affect the amount of desert and the forest/jungle allocation. 50 is normal
-
-"wateronland" gives twice the percentage of river tiles. Actual number will be lower, because rivers merge to prevent ugly "river on every tile in the grid". Wateronland also affect the desert/swamp balance, and p/g allocation. 50 is normal
-*/
-void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
-	int i = mapx*mapy;
-	sealevel(tp, land, tile, weather); //Also sorts on height
-	int landtiles = land * i / 100;
-  int seatiles = i - landtiles;
-	int shallowsea = seatiles/3;
-	int deepsea = seatiles - shallowsea;
-
-	int highland = hillmountain * landtiles / 100;
-	int lowland = landtiles - highland;
-	int mountains = highland/3;
-	int hills = highland-mountains;
-	int j;
-	int limit;
-
-	//These are parts, not percentages. They sum to 100 in the default case though
-	float d_part = 80.0 * tempered/100.0 * (100.0-wateronland)/100.0; // 0–80, 20 normal
-float pg_part = 40.0;
-	
+void set_parts(int tempered, int wateronland, float *dp, float *pp, float *gp, float *fp, float *jp, float *sp, float *psum) {
+	*dp = 80.0 * tempered/100.0 * (100.0-wateronland)/100.0; // 0–80, 20 normal
+	float pg_part = 40.0;
 	float fj_part = 20.0;
-	float s_part = 40.0 * wateronland/100.0; //0–40, 20 normal
+	*sp = 40.0 * wateronland/100.0; //0–40, 20 normal
+	*fp = fj_part * (100.0-tempered) / 100.0;
+  *jp = fj_part - *fp;
+	*pp = pg_part * (100.0-wateronland) / 100.0;
+	*gp = pg_part * wateronland / 100.0;
+	*psum = *dp + *pp + *gp + *fp + *jp + *sp;
+}
 
-	float f_part = fj_part * (100.0-tempered) / 100.0;
-	float j_part = fj_part - f_part;
-	float p_part = pg_part * (100.0-wateronland) / 100.0;
-	float g_part = pg_part * wateronland / 100.0;
-	float partsum = d_part + p_part + g_part + f_part + j_part + s_part;
-	j = 0;
-  for (limit = deepsea; j < limit; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
-  for (; j < seatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
-	int firsthill = seatiles + lowland;
-	limit = firsthill + hills;
-	for (j = firsthill; j < limit; ++j) {
-if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
-		else if (tp[j]->temperature < T_TUNDRA) set(&tp[j]->terrain, 't');
-		else set(&tp[j]->terrain, 'h');
-	}
-	for (;j < i; ++j) if (tp[j]->terrain == '+' && tp[j]->temperature < T_GLACIER) tp[j]->terrain='a';
-	else set(&tp[j]->terrain, 'm');
 
-	//The rest is flat, sort on temperature first
-	qsort(tp + seatiles, lowland, sizeof(tiletype *), &q_compare_temperature);
-	for (j = seatiles; tp[j]->temperature < T_GLACIER; ++j) tp[j]->terrain = 'a';
-	for (; tp[j]->temperature < T_TUNDRA; ++j) set(&tp[j]->terrain, 't');
-	int firsttempered = j;
-
-	//Sort firsttempered to firsthill on wetness,
-	//divide into desert, plain, grass, forest, jungle, swamp
-	qsort(tp+firsttempered, firsthill-firsttempered, sizeof(tiletype *), &q_compare_wetness);
-	int total = firsthill - firsttempered;
-#ifdef DBG
-	printf("First d wetness: %i\n", tp[j]->wetness);
-#endif
-	//int fifth = (firsthill-firsttempered) / 5;
-	limit = firsttempered + (d_part/partsum)*total;
-	for (; j < limit; ++j) set(&tp[j]->terrain, 'd');
-#ifdef DBG
-	printf("  First p wetness: %i\n", tp[j]->wetness);
-#endif
-	for (limit += (p_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'p');
-#ifdef DBG
-	printf("  First g wetness: %i\n", tp[j]->wetness);
-#endif	
-	for (limit += (g_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'g');
-#ifdef DBG
-	printf("First f/j wetness: %i\n", tp[j]->wetness);
-#endif
-
-	//Split the forests on temperature. The warmer part is jungle
-	int forest = fj_part/partsum * total;
-	qsort(tp + limit, forest, sizeof(tiletype *), &q_compare_temperature);
-	int firstswamp = limit + forest;
-	for (limit += f_part/partsum*total; j < limit; ++j) set(&tp[j]->terrain, 'f');
-	for (limit = firstswamp; j < limit; ++j) set(&tp[j]->terrain, 'j');
-#ifdef DBG
-	printf("First s wetness: %i\n", tp[j]->wetness);
-#endif
-
-	for (limit = firsthill; j < limit; ++j) set(&tp[j]->terrain, 's');
-#ifdef DBG
-	printf(" Last s wetness: %i\n", tp[j-1]->wetness);
-#endif
-
-	//Assign the rivers
+void assign_rivers(tiletype **tp, int seatiles, int landtiles, int wateronland) {
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
-	j = 0;
+	int limit, j = 0;
 	int rivertiles = landtiles * wateronland / 200; //More than 50% river tiles is useless anyway
 	int nonrivers = landtiles - rivertiles;
 	for (limit = seatiles + nonrivers; j < limit; ++j) {
@@ -705,10 +648,10 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 	}
 	for (limit += rivertiles; j < limit; ++j) {
 		tp[j]->river = (tp[j]->terrain != '+' && tp[j]->waterflow > 0) ? 1 : 0; 
-	}
-  terrain_fixups(tile);
-	
+	}	
+}
 
+void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	//pre-terrain stuff
 	fprintf(f, "[scenario]\n");
 	fprintf(f, "game_version=3000100\n");
@@ -724,7 +667,7 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 
   fprintf(f, "[savefile]\n");
 	fprintf(f, "options=\" +version3\"\n");
-	fprintf(f, "rulesetdir=\"civ2civ3\"\n");
+	fprintf(f, "rulesetdir=\"%s\"\n", extended_terrain ? "hh" : "civ2civ3");
 	fprintf(f, "version=40\n");
 	fprintf(f, "reason=\"Scenario\"\n");
 	fprintf(f, "revision=\"3.0.1\"\n");
@@ -736,8 +679,9 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 	fprintf(f, "action_vector=\"Establish Embassy\",\"Establish Embassy Stay\",\"Investigate City\",\"Investigate City Spend Unit\",\"Poison City\",\"Poison City Escape\",\"Steal Gold\",\"Steal Gold Escape\",\"Sabotage City\",\"Sabotage City Escape\",\"Targeted Sabotage City\",\"Targeted Sabotage City Escape\",\"Steal Tech\",\"Steal Tech Escape Expected\",\"Targeted Steal Tech\",\"Targeted Steal Tech Escape Expected\",\"Incite City\",\"Incite City Escape\",\"Establish Trade Route\",\"Enter Marketplace\",\"Help Wonder\",\"Bribe Unit\",\"Sabotage Unit\",\"Sabotage Unit Escape\",\"Capture Units\",\"Found City\",\"Join City\",\"Steal Maps\",\"Steal Maps Escape\",\"Bombard\",\"Suitcase Nuke\",\"Suitcase Nuke Escape\",\"Explode Nuclear\",\"Destroy City\",\"Expel Unit\",\"Recycle Unit\",\"Disband Unit\",\"Home City\",\"Upgrade Unit\",\"Paradrop Unit\",\"Airlift Unit\",\"Attack\",\"Conquer City\",\"Heal Unit\"\n");
 	fprintf(f, "action_decision_size=3\n");
 	fprintf(f, "action_decision_vector=\"nothing\",\"passive\",\"active\"\n");
-	fprintf(f, "terrident={\"name\",\"identifier\"\n\"Inaccessible\",\"i\"\n\"Lake\",\"+\"\n\"Ocean\",\" \"\n\"Deep Ocean\",\":\"\n\"Glacier\",\"a\"\n\"Desert\",\"d\"\n\"Forest\",\"f\"\n\"Grassland\",\"g\"\n\"Hills\",\"h\"\n\"Jungle\",\"j\"\n\"Mountains\",\"m\"\n\"Plains\",\"p\"\n\"Swamp\",\"s\"\n\"Tundra\",\"t\"\n}\n");
-	fprintf(f, "\n");
+	fprintf(f, "terrident={\"name\",\"identifier\"\n\"Inaccessible\",\"i\"\n\"Lake\",\"+\"\n\"Ocean\",\" \"\n\"Deep Ocean\",\":\"\n\"Glacier\",\"a\"\n\"Desert\",\"d\"\n\"Forest\",\"f\"\n\"Grassland\",\"g\"\n\"Hills\",\"h\"\n\"Jungle\",\"j\"\n\"Mountains\",\"m\"\n\"Plains\",\"p\"\n\"Swamp\",\"s\"\n\"Tundra\",\"t\"\n");
+	if (extended_terrain) fprintf(f, "\"Arctic hills\",\"A\"\n\"Desert hills\",\"D\"\n\"Forest hills\",\"F\"\n\"Jungle hills\",\"J\"\n\"Tundra hills\",\"T\"\n\"Volcanoes\",\"v\"\n");
+	fprintf(f, "}\n\n");
 
 	fprintf(f, "[game]\n");
 	fprintf(f, "server_state=\"S_S_INITIAL\"\n");
@@ -807,8 +751,133 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 			fprintf(f, "\"\n");
 		}		
 	}
+	
 }
 
+#define T_SEAICE -1
+#define T_GLACIER -6
+#define T_TUNDRA 2
+
+//Assign freeciv terrain types, and output a freeciv map
+/*
+Terrain assignment for normal freeciv tileset:
+1. Sort the tileset on height. "land" is the percentage of land tiles, so we know land from sea
+   Sea is divided into shallow and deep sea, based on height. 
+	 Sufficiently cold sea freeze to polar ice.
+	 The highest land tiles become mountains or hills depending on height and given percentages
+	 Sufficiently cold hills becomes ice or tundra instead.
+	 Remaining tiles are flat land
+2. Sort the flat land on temperature. Freeze the coldest to ice or tundra, leave the rest.
+   The arctic is now done, the rest is tempered or tropic. It is also flat.
+3. Sort the remaining on wetness, divide it into desert, plain, grass, forest and swamp
+4. Sort the forest on temperature, the hottest half is jungle
+ 
+
+Handling parameters "temperate" and "wateronland":
+
+"temperate" influence the temperature map, and therefore how much ice we get.
+It also affect the amount of desert and the forest/jungle allocation. 50 is normal
+
+"wateronland" gives twice the percentage of river tiles. Actual number will be lower, because rivers merge to prevent ugly "river on every tile in the grid". Wateronland also affect the desert/swamp balance, and p/g allocation. 50 is normal
+*/
+void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
+	int i = mapx*mapy;
+	sealevel(tp, land, tile, weather); //Also sorts on height
+	int landtiles = land * i / 100;
+  int seatiles = i - landtiles;
+	int shallowsea = seatiles/3;
+	int deepsea = seatiles - shallowsea;
+
+	int highland = hillmountain * landtiles / 100;
+	int lowland = landtiles - highland;
+	int mountains = highland/3;
+	int hills = highland-mountains;
+	int j;
+	int limit;
+
+	//These are parts, not percentages. They sum to 100 in the default case though
+	float d_part, p_part, g_part, f_part, j_part, s_part, partsum;
+	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
+
+	j = 0;
+  for (limit = deepsea; j < limit; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
+  for (; j < seatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
+	int firsthill = seatiles + lowland;
+	limit = firsthill + hills;
+	for (j = firsthill; j < limit; ++j) {
+if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
+		else if (tp[j]->temperature < T_TUNDRA) set(&tp[j]->terrain, 't');
+		else set(&tp[j]->terrain, 'h');
+	}
+	for (;j < i; ++j) if (tp[j]->terrain == '+' && tp[j]->temperature < T_GLACIER) tp[j]->terrain='a';
+	else set(&tp[j]->terrain, 'm');
+
+	//The rest is flat, sort on temperature first
+	qsort(tp + seatiles, lowland, sizeof(tiletype *), &q_compare_temperature);
+	for (j = seatiles; tp[j]->temperature < T_GLACIER; ++j) tp[j]->terrain = 'a';
+	for (; tp[j]->temperature < T_TUNDRA; ++j) set(&tp[j]->terrain, 't');
+	int firsttempered = j;
+
+	//Sort firsttempered to firsthill on wetness,
+	//divide into desert, plain, grass, forest, jungle, swamp
+	qsort(tp+firsttempered, firsthill-firsttempered, sizeof(tiletype *), &q_compare_wetness);
+	int total = firsthill - firsttempered;
+#ifdef DBG
+	printf("First d wetness: %i\n", tp[j]->wetness);
+#endif
+	//int fifth = (firsthill-firsttempered) / 5;
+	limit = firsttempered + (d_part/partsum)*total;
+	for (; j < limit; ++j) set(&tp[j]->terrain, 'd');
+#ifdef DBG
+	printf("  First p wetness: %i\n", tp[j]->wetness);
+#endif
+	for (limit += (p_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'p');
+#ifdef DBG
+	printf("  First g wetness: %i\n", tp[j]->wetness);
+#endif	
+	for (limit += (g_part/partsum)*total; j < limit; ++j) set(&tp[j]->terrain, 'g');
+#ifdef DBG
+	printf("First f/j wetness: %i\n", tp[j]->wetness);
+#endif
+
+	//Split the forests on temperature. The warmer part is jungle
+	int forest = (f_part+j_part)/partsum * total;
+	qsort(tp + limit, forest, sizeof(tiletype *), &q_compare_temperature);
+	int firstswamp = limit + forest;
+	for (limit += f_part/partsum*total; j < limit; ++j) set(&tp[j]->terrain, 'f');
+	for (limit = firstswamp; j < limit; ++j) set(&tp[j]->terrain, 'j');
+#ifdef DBG
+	printf("First s wetness: %i\n", tp[j]->wetness);
+#endif
+
+	for (limit = firsthill; j < limit; ++j) set(&tp[j]->terrain, 's');
+#ifdef DBG
+	printf(" Last s wetness: %i\n", tp[j-1]->wetness);
+#endif
+
+	//Assign the rivers
+	assign_rivers(tp, seatiles, landtiles, wateronland);
+  terrain_fixups(tile);
+	
+	output_terrain(f, tile, false);
+
+}
+
+void set_tile(tiletype *t, char lowtype, char hilltype) {
+	switch (t->terrain) {
+		case '+':
+			return; //Lakes remain lakes
+		case 'l':
+			t->terrain = lowtype;
+			return;
+		case 'h':
+			t->terrain = hilltype;
+			return;
+		default:
+			printf("Impossible tiletype '%c' (%i) seen. Could not assign '%c' or '%c'\n", t->terrain, t->terrain, lowtype, hilltype);
+			fail("Internal error, expected only terrain types 'l', 'h' or '+' at this point.");
+	}
+}
 
 /*
 Terrain assignment for extended tile set:
@@ -825,8 +894,7 @@ Terrain assignment for extended tile set:
 4. Sort the forest part on temperature, the hotter part is jungle instead
 */
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
-	//Sort on height, determine sea level, correct tile temperatures
-	sealevel(tp, land, tile, weather);
+
 	int i = mapx * mapy;
 	int landtiles = land * i / 100;
 	int seatiles = i - landtiles;
@@ -835,6 +903,13 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	int lowland = landtiles - highland;
 	int mountains = highland / 3;
 	int hills = highland - mountains;
+
+	float d_part, p_part, g_part, f_part, j_part, s_part, partsum;
+	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
+
+	//Classify terrain by height, and sometimes temperature
+	//Sort on height, determine sea level, correct tile temperatures
+	sealevel(tp, land, tile, weather);
 
 	int limit, j = 0;
 	//Deep sea or ice
@@ -846,43 +921,66 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	for (limit = j + lowland; j < limit; ++j) set(&tp[j]->terrain, 'l');
 	//Assign hill land
 	for (limit = j + hills; j < limit; ++j) set(&tp[j]->terrain, 'h');
-	//Assign mountains
-	for (; j < i; ++j) set(&tp[j]->terrain, 'm');
+	//Assign mountains, 1 in 25 get to be a volcano. For now, the highest mountains
+	limit = i - mountains / 25;
+	for (; j < limit; ++j) set(&tp[j]->terrain, 'm');
+	for (; j < i; ++j) tp[j]->terrain = 'v';
 
-	//Sort land tiles on temperature, except mountains
+	//Sort land tiles on temperature, except mountains. Separate arctic / nonarctic land
 	qsort(tp + firstland, landtiles-mountains, sizeof(tiletype *), &q_compare_temperature);
 
 	//Assign arctic terrain types
-	for (j = firstland; tp[j]->temperature < T_GLACIER; ++j) switch (tp[j]->terrain) {
-		case '+':
-			continue;
-		case 'l':
-			tp[j]->terrain = 'a';
-			break;
-		case 'h':
-			tp[j]->terrain = 'A';
-			break;
-		default:
-			printf("Mysterious terrain type '%c'\n",tp[j]->terrain);
-			fail("Impossible 1.");
-	}
+	for (j = firstland; tp[j]->temperature < T_GLACIER; ++j) set_tile(tp[j], 'a', 'A');
 	//Assign tundra terrain types
-	for (; tp[j]->temperature < T_TUNDRA; ++j) switch (tp[j]->terrain) {
-		case '+':
-			continue;
-		case 'l':
-			tp[j]->temperature = 't';
-			break;
-		case 'h':
-			tp[j]->temperature = 'T';
-			break;
-		default:
-			printf("Mysterious terrain type '%c'\n",tp[j]->terrain);
-			fail("Impossible 2.");
-	}
+	for (; tp[j]->temperature < T_TUNDRA; ++j) set_tile(tp[j], 't', 'T');
+
 	int firsttempered = j;
-	
-	//Sort tempered/tropic on wetness
+	int total = i - firsttempered - mountains;
+#ifdef DBG
+	printf("%i tempered/tropical tiles\n", total);
+#endif
+	//Sort tempered/tropic low/hills on wetness, classify on wetness
+	qsort(tp + firsttempered, total, sizeof(tiletype *), &q_compare_wetness);
+
+#ifdef DBG
+	printf("%i dD desert tiles\n", (int)(d_part/partsum*total));
+#endif
+	//Assign deserts (flat+hills)
+	limit = firsttempered + (d_part/partsum) * total;
+	for (; j < limit; ++j) set_tile(tp[j], 'd', 'D');
+#ifdef DBG
+	printf("%i ph plain/hill tiles\n", (int)(p_part/partsum*total));
+#endif
+	//Assign plains & hills
+	for (limit += (p_part/partsum)*total; j < limit; ++j) set_tile(tp[j], 'p', 'h');
+
+#ifdef DBG
+	printf("%i gh grass/hill tiles\n", (int)(g_part/partsum*total));
+#endif
+	//Assign grassland & hills
+	for (limit += (g_part/partsum)*total; j < limit; ++j) set_tile(tp[j], 'g', 'h');
+
+	//Forests & forested hills. Sort on temperature, separating out jungle/jungle hills
+	limit += (f_part+j_part) / partsum * total;
+	qsort(tp + j, limit - j, sizeof(tiletype *), &q_compare_temperature); 
+	int	flimit = j + (f_part) / partsum * total;
+	for (; j < flimit; ++j) set_tile(tp[j], 'f', 'F');
+	for (; j < limit; ++j) set_tile(tp[j], 'j', 'J');
+
+	//swamps & forested hills. Sort on temperature, separating out jungle hills
+	//Hills are too steep to be swampy, the water runs off. So, forest/jungle instead.
+	qsort(tp + j, i-j - mountains, sizeof(tiletype *), &q_compare_temperature);
+	flimit = j + s_part/partsum * total * (f_part/(f_part+j_part));
+	for (; j < flimit; ++j) set_tile(tp[j], 's', 'F');
+	limit = i - mountains;
+	for (; j < limit; ++j) set_tile(tp[j], 's', 'J');
+
+	//Terrain done, set up the rivers
+	assign_rivers(tp, seatiles, landtiles, wateronland);
+
+	terrain_fixups(tile);
+
+	output_terrain(f, tile, true);
 }
 
 //Ensures recursively that mountains stay below 10000m when plates collide.
