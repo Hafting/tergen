@@ -58,6 +58,14 @@ May also use diagonal neigbours:
 (-1,-1) (-1, 1) (1, -1) (1, 1)
 
 
+
+|----->  x' = x
+|
+|
+v y' = y
+Distance is pythagorean: sqrt(dx*dx+dy*dy)
+Squarede dist: dx*dx+dy*dy
+
 square iso topo 1
 ==========
 a   b   c       Each tile a diamond, closest neighbours diagonally
@@ -76,6 +84,31 @@ tile neighbours  odd lines: ( 0,-1) (1,-1) (0, 1) (1, 1)
 tile neighbours even lines: (-1,-1) (0,-1) (-1,1) (0, 1)
 
 odd & even diagonals: (0,-2) (-1,0) (1,0) (0,2)
+game         array indices xy    game indices gxgy
+             00  10  20  30           00
+    /\         01  11  21  31       01  10     
+gy|/  \| gx  02  12  22  32       02  11  20
+               03  13  23  33   03  12  21 30
+	                                13  22  31
+Distances
+---------
+The coordinate system is rotated 45 degrees. 
+A step in x direction adds 1 to gx and subtract 1 from gy
+2 steps in y direction add 1 to gy, and add 1 to gx
+1 y-step from even y: add 1 to gx
+1 y-step from odd y: add 1 to gy
+
+game dist is sqrt(dx' * dx'   +   dy' * dy')
+for even y:
+dx' =  dx + (dy+1)/2   
+dy' = -dx + dy/2
+for odd y:
+dx' =  dx + dy/2
+dy' = -dx + (dy+1)/2
+
+Combined:
+gdx = dx + (dy + (~y & 1))/2
+gdy = -dx + (dy + (y & 1))/2
 
 hex nonISO topo 2
 ==========
@@ -94,6 +127,18 @@ Directions: 0,60,120,180,240,300
 Tile neighbours  odd lines: (0,-1)  (1,-1) (-1,0) (1,0) (0,1)  (1,1)
 Tile neighbours even lines: (-1,-1) (0,-1) (-1,0) (1,0) (-1,1) (0,1)
 
+distances
+a to b equals a to d and b to d this distance is "1.0"
+each row is sqrt(3)/2 lower than the previous, and centers offset 1/2 to the side
+
+offset from even y:
+gdx = dx + (0.5, if dy is odd)
+gdy = sqrt(3)/2 * dy
+
+offset from odd y:
+gdx = dx - (0.5, if dy is odd)
+gdy = sqrt(3)/2 * dy
+
 hex ISO topo 3
 =======
 hexagons are flat (connecting) above and below, points to the sides.
@@ -111,6 +156,19 @@ Directions: 30, 90, 150, 210, 270, 330
 Tile neighbours  odd lines: (0,-2) (0,-1)  (1,-1) (0,1)  (1,1) (0,2)
 Tile neighbours even lines: (0,-2) (-1,-1) (0,-1) (-1,1) (0,1) (0,2)
 
+a-g, a-d and g-d has distance 1.0
+a-b has distance sqrt(3)
+Adding 2 to y, increase gdy by one.
+Adding 1 to x, increase gdx by sqrt(3).
+Even y:
+adding 1 to y, increase gdy by 0.5, and gdx by sqrt(3)/2
+Odd y: 
+adding 1 to y, increase gdy by 0.5, and subtract sqrt(3)/2 from gdx
+So, gdy = dy/2 in all cases.
+Even y:
+gdx = dx*sqrt(3) + sqrt(3)/2
+Odd y:
+gdx = dx*sqrt(3) - sqrt(3)/2
 */
 
 /*
@@ -291,20 +349,42 @@ void percentcheck(int const x) {
 
 //Finds square of distance between two points.
 //Shortest distance, using wrapx, wrapy, both or none.
-//Uses ints for speed, ok even if the coordinates may be floats.
 int sqdist(int const x1, int const y1, int const x2, int const y2) {
-	int dx, dx2, dy, dy2;
-
-  dx = x1-x2; 
-	if (dx < 0) dx = -dx;
-	dx2 = mapx - dx;
- 	if (dx2 < dx) dx = dx2;
+	int dx, dy;
+	//Check if wrapping gives shorter dist. The sign matters for some of the conversions!
+	dx = x1-x2; 
+	if (dx > mapx/2) dx -= mapx;
+	else if (dx < -mapx/2) dx += mapx;
 
 	dy = y1-y2;
-	if (dy < 0) dy = -dy;
-	dy2 = mapy - dy;
-	if (dy2 < dy) dy = dy2;
-	return dx*dx + dy*dy;
+	if (dy > mapy/2) dy -= mapy;
+	else if (dy < -mapy/2) dy += mapy;
+
+	switch (topo) {
+		case 0: //Ordinary square grid. game x,y and array x,y is the same
+		default: 
+			return dx*dx + dy*dy;
+		case 1: //square with ISO, game x,y computed from array x,y
+			{
+				int gdx =  dx + (dy + (~y1 & 1))/2; 
+				int gdy = -dx + (dy + ( y1 & 1))/2;
+				return gdx * gdx + gdy * gdy;
+			}
+		case 2: //hex non-iso
+			{
+				float gdy = dy * fsqrt(3) / 2; 
+				float gdx = dx;
+				if (dy & 1) gdx += (y1 & 1) ? -0.5 : 0.5;
+				return gdx*gdx + gdy*gdy;
+			}
+		case 3: //hex iso
+			{
+				float gdy = (float)dy / 2;
+				float gdx = dx * sqrtf(3);
+				gdx += y1 & 1 ? -sqrtf(3)/2 : sqrtf(3)/2;
+				return gdx*gdx + gdy*gdy;
+			}
+	}
 }
 
 /* Random number in a range (inclusive) */
@@ -1497,12 +1577,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//Assign each tile to the nearest plate:
 	//correct only for square topology, probably "close enough" anyway
 	//correction for ISO
-	int isocorr = 1+ (topo & 1);
+	int isocorr = 1 + (topo & 1);
+	isocorr = isocorr * isocorr;
 	for (int x = mapx; x--;) for (int y = mapy; y--;) {
 		int best_plate = 0;
-		int best_sqdist = sqdist(x * isocorr, y, plate[0].cx * isocorr, plate[0].cy);
+		int best_sqdist = sqdist(x, y, plate[0].cx, plate[0].cy);
 		for (int p = plates; --p;) {
-			int dist = sqdist(x * isocorr, y, plate[p].cx * isocorr, plate[p].cy);
+			int dist = sqdist(x, y, plate[p].cx, plate[p].cy);
 			if (dist < best_sqdist) {
 				best_plate = p;
 				best_sqdist = dist;
