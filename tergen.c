@@ -313,6 +313,7 @@ char paramtxt[1024]; //parameter list
 char *nametxt;
 
 int airheight[9] = {50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000};
+int rounds;
 
 /*  odd & even neighbour arrays for the topologies  */
 neighbourtype n0o[] = {{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{-1,1},{1,-1},{1,1}};
@@ -393,18 +394,6 @@ float frand(float min, float max) {
 	return min + random() * range / RAND_MAX;
 }
 
-/*
-Weather effects moves one tile per round. 
-To get clouds from the sea to the center of a continent,
-we need as many rounds as the radius of the largest continent.
-Otherwise, the interior will necessarily be deserts.
-
-Each round also erodes the terrain. Too many, and it may all be flat.
-100 rounds with 100 erosion can remove a mountain of height 10000
-*/
-#define ROUNDS 100
-
-
 
 /* Make a tectonic plate, not too close to other plates. */
 int mkplate(int const plates, int const ix, platetype plate[plates]) {
@@ -418,8 +407,8 @@ int mkplate(int const plates, int const ix, platetype plate[plates]) {
 		plate[ix].cx = plate[ix].ocx = x;
 		plate[ix].cy = plate[ix].ocy = y;
 		plate[ix].ix = ix + 1;
-		plate[ix].vx = frand(-5.0/ROUNDS,5.0/ROUNDS);
-		plate[ix].vy = frand(-5.0/ROUNDS,5.0/ROUNDS);
+		plate[ix].vx = frand(-5.0/rounds,5.0/rounds);
+		plate[ix].vy = frand(-5.0/rounds,5.0/rounds);
 		plate[ix].rx = plate[ix].ry = 0;
 		break;
 		tryagain:;
@@ -1277,11 +1266,15 @@ void find_wind(float latitude, int east, char *wind1, char *wind2, char *wstreng
 /*  Initialize weather data. Tile temperatures, atmosphere above them
 */
 void init_weather(tiletype tile[mapx][mapy], airboxtype air[mapx][mapy][9], weatherdata weather[mapx][mapy], int tempered) {
-	memset(air, 0, 9*mapx*mapy*sizeof(airboxtype));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
-		t->wetness = t->waterflow = 0;
+		t->wetness = 10;
+		t->waterflow = 0;
 		t->rocks = 0;
+		for (int z = 0; z < 9; ++z) {
+			air[x][y][z].water = 10;
+			air[x][y][z].new = 0;
+		}
 	}
 	int sea_min =  -14 * (100-tempered) / 100 + 2;
 	int sea_max = 20 * tempered / 100 + 20;
@@ -1554,6 +1547,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		tile[x][y].height = heightsum / (neighbours[topo]+2); //rocks is not in use at this stage
 	}
 
+	//Number of rounds for tectonics & weather
+	rounds = mapx > mapy ? mapx : mapy;
 
 	//Phase 2: plate tectonics, weather & erosion
 	//Make the tectonic plates
@@ -1633,7 +1628,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	neighpostype *np = nposition[topo];
 	/* Move plates */
 	printf("Plate tectonics with %i plates\n", plates);
-	for (int i = 1; i <= ROUNDS; ++i) {
+	for (int i = 1; i <= rounds; ++i) {
 		//Move the plates
 		for (int p = 0; p < plates; ++p) {
 			platetype *pl = &plate[p];
