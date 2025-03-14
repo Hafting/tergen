@@ -1,5 +1,5 @@
 /*
-    tergen - terrain generator for freeciv (2.6)
+    tergen - terrain generator for freeciv (2.6-3.1)
 		Simulates planet creation, plate tectonics, weather & erosion,
 		hoping to arrive at interesting or realistic terrains.
 
@@ -36,6 +36,7 @@ t05="pqr"
 
 (0,0) is top left tile. x increase to the right, y increase down
 
+
 Square nonISO topo 0
 =============
 (0,0) to (1,1) is 45 degrees for geometrical purposes. But it is a down direction, because y increase in the 90 degree direction, which is down.
@@ -57,14 +58,13 @@ Tile neighbour offsets for odd & even lines:
 May also use diagonal neigbours:
 (-1,-1) (-1, 1) (1, -1) (1, 1)
 
-
-
 |----->  x' = x
 |
 |
 v y' = y
 Distance is pythagorean: sqrt(dx*dx+dy*dy)
 Squarede dist: dx*dx+dy*dy
+
 
 square iso topo 1
 ==========
@@ -110,6 +110,7 @@ Combined:
 gdx = dx + (dy + (~y & 1))/2
 gdy = -dx + (dy + (y & 1))/2
 
+
 hex nonISO topo 2
 ==========
 The hexagons are flat (connecting) on the sides, points up and down.
@@ -138,6 +139,7 @@ gdy = sqrt(3)/2 * dy
 offset from odd y:
 gdx = dx - (0.5, if dy is odd)
 gdy = sqrt(3)/2 * dy
+
 
 hex ISO topo 3
 =======
@@ -254,7 +256,7 @@ typedef struct {
 	short height; //Meters above lowest sea bottom. Max 10000
 	char terrain; //Freeciv terrain letter
 	char plate;   //id of tectonic plate this tile belongs to
-	char mark; //for depth-first search.
+	char mark; //for depth-first search, volcano calculations etc.
 	char river; //for river assignment during map output
 	char lowestneigh; //direction of lowest neighbour
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
@@ -572,7 +574,8 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 		} else if (t->terrain == 'v') for (n = 0; n < neighcount; ++n) { //Volcanoes
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
-			if (tile[nx][ny].terrain == 'm' && (random() & 7) == 0) tile[nx][ny].terrain = 'v';
+			//A volcano may spread to a neighbour riverless mountain
+			if ((tile[nx][ny].terrain == 'm') && !tile[nx][ny].river && (random() & 7) == 0) tile[nx][ny].terrain = 'v';
 		}
 	}
 
@@ -594,7 +597,6 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 			//Occurs because of land sinking or eroding
 			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
 		} else if (t->terrain == 'v') {
-			t->river = 0; //River ON the volcano looks weird. 
 			//Volcanoes fertilize terrain around them, so convert to food terrain
 			//Also melt ice
 			for (n = 0; n < neighcount; ++n) {
@@ -948,6 +950,55 @@ void set_tile(tiletype *t, char lowtype, char hilltype) {
 }
 
 /*
+Previous default was that one in 25 mountains became volcanoes, and that was the highest mountains. This gave an ok amount of volcanoes, but we have plate tectonics and can do better than that.
+
+Parameters: number, initially number of mountain tiles. We want ca. mountains/25 volcanoes, so it gets divided.
+
+To avoid interrupted rivers, don't make a volcano where there is river.
+
+Pass 1: count eligible tiles. They are mountains (or hills), without river, and sit on a tectonic plate edge
+        
+        Using the number of eligible tiles and number of volcanoes, make a probability for such a tile to erupt
+
+Pass 2: for each eligible tile, consult the random generator and possibly place a volcano.
+	 */
+void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
+	int eligible = 0;
+	number /= 25;
+	number = !number ? 1 : number;
+	//Pass 1
+	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+		tiletype *t = &tile[x][y];
+		if (!t->river && (t->terrain == 'm' || t->terrain == 'h' || t->terrain == 'A' || t->terrain == 'T'
+		               || t->terrain == 'F' || t->terrain == 'J' || t->terrain == 'D')) {
+			//Tile is high, and no river. Check if it is on a plate edge
+			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+			t->mark = 0;
+			for (int n = 0; n < neighbours[topo]; ++n) {
+				int nx = wrap(x+nb[n].dx, mapx);
+				int ny = wrap(y+nb[n].dy, mapy);
+				if (tile[nx][ny].plate != t->plate) {
+					t->mark = 1; //Tile MAY go volcanic
+					++eligible;
+					break;
+				}
+			}
+		}
+	} //pass 1 done
+	if (!eligible) return;
+	int chance = (eligible > number) ? 16*eligible / number : 16; // *16, fixed point arithmetic
+	//Pass 2
+	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+		tiletype *t = &tile[x][y];
+		if (t->mark) {
+			int r = random();
+			if ( (r % chance) < 16) t->terrain = 'v';
+		}
+	}
+
+}
+
+/*
 Terrain assignment for extended tile set:
 1. Sort the tileset on height. 
    The land percentage decides land/sea. 
@@ -961,7 +1012,6 @@ Terrain assignment for extended tile set:
    desert,  hill,  hill, forest, forest      (hill terrain)
 4. Sort the forest part on temperature, the hotter part is jungle instead
 
-Didn't work well. Most hills became deserts. Bug in rain?
 */
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 
@@ -991,10 +1041,8 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	for (limit = j + lowland; j < limit; ++j) set(&tp[j]->terrain, 'l');
 	//Assign hill land
 	for (limit = j + hills; j < limit; ++j) set(&tp[j]->terrain, 'h');
-	//Assign mountains, 1 in 25 get to be a volcano. For now, the highest mountains
-	limit = i - mountains / 25;
-	for (; j < limit; ++j) set(&tp[j]->terrain, 'm');
-	for (; j < i; ++j) tp[j]->terrain = 'v';
+	//Assign mountains
+	for (; j < i; ++j) tp[j]->terrain = 'm';
 
 	//Sort land tiles on temperature, except mountains. Separate arctic / nonarctic land
 	qsort(tp + firstland, landtiles-mountains, sizeof(tiletype *), &q_compare_temperature);
@@ -1058,6 +1106,8 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 	//Terrain done, set up the rivers
 	assign_rivers(tp, seatiles, landtiles, wateronland);
+
+	assign_volcanoes(tile, mountains);
 
 	terrain_fixups(tile);
 
