@@ -341,6 +341,25 @@ neighpostype *nposition[4] = {np0, np1, np2, np3};
 /*  This many tile neighbours in each topology */
 int neighbours[4] = {8,4,6,6};
 
+/* Heightmap changes due to asteroid strike */
+short chicxulub[4][7][7] = { //topo 0
+	{ {    0, 1000, 6000, 6000, 6000, 1000,    0},
+		{ 1000, 6000,-2000,-3000,-2000, 6000, 1000},
+		{ 6000,-2000,-3000,-3000,-3000,-2000, 6000},
+		{ 6000,-3000,-3000, 9000,-3000,-3000, 6000},
+		{ 6000,-2000,-3000,-3000,-3000,-2000, 6000},
+		{ 1000, 6000,-2000,-3000,-2000, 6000, 1000},
+		{    0, 1000, 6000, 6000, 6000, 1000,    0}
+
+	},
+	{
+	},
+	{
+	},
+	{
+	}
+};
+
 void fail(char *s) {
 	printf("%s\n", s);
 	exit(1);
@@ -543,14 +562,17 @@ void lake_to_sea(int x, int y, tiletype tile[mapx][mapy]) {
 /*
 		Fixups. 
 		 - Small landlocked pieces of sea become lakes
-		 - single-tile islands become shallow sea
+		 - some single-tile islands become shallow sea
+		 - some single-tile islands grows
 		 - deep sea with more than one land neighbours become shallow 
 		 - lake connected to sea become shallow sea
 		 - river in the ice removed, unless there is a non-arctic neighbour (ice edge may have river)
+		 - volcanoes sometimes spread to neighbour mountain tiles
+		 - volcanoes affect neighbour terrain
+		 - thin too dense river grids
 	 */
 void terrain_fixups(tiletype tile[mapx][mapy]) {
 	//Get rid of single-tile islands, except unbuildable ones.
-	//volcanoes may spread to a neighbour mountain
 	int const neighcount = neighbours[topo];
 	int n;
 
@@ -1521,6 +1543,20 @@ bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *new
 	return true;
 }
 
+void asteroid_strike(tiletype tile[mapx][mapy]) {
+	int x = random() % mapx;
+	int y = random() % mapy;x=2;y=2;
+	printf("DBG asteroid strike at %i,%i\n",x,y);
+	for (int cx = -3; cx <=3 ; ++cx) for (int cy = -3; cy <= 3; ++cy) {
+		short heightchange = chicxulub[0][cx+3][cy+3];
+		int nx = wrap(x+cx, mapx);
+		int ny = wrap(y+cy, mapy);
+		tile[nx][ny].height += heightchange;
+		if (tile[nx][ny].height < 0) tile[nx][ny].height = 0;
+		else if (tile[nx][ny].height > 10000) mountaincheck(nx, ny, tile);
+	}
+}
+
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Phase 1: initialization
 	
@@ -1598,6 +1634,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	}
 
 	//Number of rounds for tectonics & weather
+	//Use the largest coordinate, so clouds will have time to 
+	//get around the world.
 	rounds = mapx > mapy ? mapx : mapy;
 
 	//Phase 2: plate tectonics, weather & erosion
@@ -1678,6 +1716,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	neighpostype *np = nposition[topo];
 	/* Move plates */
 	printf("Plate tectonics with %i plates\n", plates);
+	int asteroids = 1;
 	for (int i = 1; i <= rounds; ++i) {
 		//Move the plates
 		for (int p = 0; p < plates; ++p) {
@@ -1702,6 +1741,11 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			}
 		}
 		/* Run weather & erosion */
+		if (asteroids && i==14) {
+			--asteroids;
+			//So far, only topology 0
+			if (topo == 0 || topo == 10) asteroid_strike(tile);
+		}
 #ifdef DBG		
 		printf("weather, round %i\n",i);
 #endif
