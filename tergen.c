@@ -39,16 +39,16 @@ t05="pqr"
 
 Square nonISO topo 0
 =============
-(0,0) to (1,1) is 45 degrees for geometrical purposes. But it is a down direction, because y increase in the 90 degree direction, which is down.
+(0,0) to (1,1) is 45 degrees for geometrical purposes. But it is a down direction on the display, as tiles have a diamond orientation.
 
-
-abc   "a" is the top corner in the rendering, "c" is right corner.
-def
-ghi
-jkl
-mno
-pqr
-
+"a" is the top corner in the rendering, "c" is right corner.
+abc      ..***..   Asteroid impact, 7×7
+def      .*...*.
+ghi      *.....*
+jkl      *..*..*
+mno      *.....*
+pqr      .*...*.
+         ..***..
 h neighbours: egik (with diagonals: defgijkl)
 Directions: 0,90,180,270
 Diagonals: 45,135,225,315 
@@ -68,12 +68,17 @@ Squarede dist: dx*dx+dy*dy
 
 square iso topo 1
 ==========
-a   b   c       Each tile a diamond, closest neighbours diagonally
-  d   e   f
-g   h   i
-  j   k   l
-m   n   o
-  p   q   r
+Each tile a diamond, closest neighbours diagonally
+a   b   c       .   *   *   *   .    Asteroid impact, 5×9
+  d   e   f       *   .   .   *   .  Centered on an EVEN line
+g   h   i       *   .   .   .   * 
+  j   k   l       .   .   .   .   .
+m   n   o       *   .   *   .   * 
+  p   q   r       .   .   .   .   .
+                *   .   .   .   * 
+                  *   .   .   *   .
+                .   *   *   *   . 
+
 
 h neighbours: dejk (with diagonals: bdegijkn)
 k neighbours: hino (with diagonals: ehijlnoq)
@@ -113,14 +118,14 @@ gdy = -dx + (dy + (y & 1))/2
 
 hex nonISO topo 2
 ==========
-The hexagons are flat (connecting) on the sides, points up and down.
-a b c
- d e f
-g h i
- j k l
-m n o
- p q r
-
+The hexagons are flat (connecting) on the sides, corners point up and down.
+a b c       ◦ ◦ • • • • ◦    7×7 asteroid strike, centered on ODD line
+ d e f       ◦ • ◦ ◦ ◦ • ◦   If the asteroid strike diagram looks bad, get a proper unicode font
+g h i       ◦ • ◦ ◦ ◦ ◦ •    for viewing this. Ascii is not enough, and never was.
+ j k l       • ◦ ◦ • ◦ ◦ •   If you REALLY want to display this on a VT100, use sw that
+m n o       ◦ • ◦ ◦ ◦ ◦ •    substitutes characters for you.
+ p q r       ◦ • ◦ ◦ ◦ • ◦  
+            ◦ ◦ • • • • ◦
 h neighbours: degijk
 k neighbours: hijlno
 Directions: 0,60,120,180,240,300
@@ -143,13 +148,21 @@ gdy = sqrt(3)/2 * dy
 
 hex ISO topo 3
 =======
-hexagons are flat (connecting) above and below, points to the sides.
-a   b   c
-  d   e   f
-g   h   i
-  j   k   l
-m   n   o
-  p   q   r
+hexagons are flat (connecting) above and below, corners point to the sides.
+a   b   c       ◦     ◦     •     ◦     Asteroid strike, 4×13  
+  d   e   f        ◦     •     •     ◦  Centered on EVEN line
+g   h   i       ◦     •     ◦     •       
+  j   k   l        •     ◦     ◦     •   
+m   n   o       ◦     ◦     ◦     ◦       
+  p   q   r        •     ◦     ◦     •   
+                ◦     ◦     •     ◦        
+                   •     ◦     ◦     • 
+                ◦     ◦     ◦     ◦       
+                   •     ◦     ◦     •  
+                ◦     •     ◦     •      
+                   ◦     •     •     ◦   
+                ◦     ◦     •     ◦       
+
 
 h neighbours: bdejkn
 k neighbours: ehinoq
@@ -342,23 +355,54 @@ neighpostype *nposition[4] = {np0, np1, np2, np3};
 int neighbours[4] = {8,4,6,6};
 
 /* Heightmap changes due to asteroid strike */
-short chicxulub[4][7][7] = { //topo 0
-	{ {    0, 1000, 6000, 6000, 6000, 1000,    0},
+short chicxulub[4][13][7] = {
+	{ {    0, 1000, 6000, 6000, 6000, 1000,    0}, //topology 0, 7×7
 		{ 1000, 6000,-2000,-3000,-2000, 6000, 1000},
 		{ 6000,-2000,-3000,-3000,-3000,-2000, 6000},
-		{ 6000,-3000,-3000, 9000,-3000,-3000, 6000},
+		{ 6000,-3000,-3000, 7000,-3000,-3000, 6000}, //even or odd
 		{ 6000,-2000,-3000,-3000,-3000,-2000, 6000},
 		{ 1000, 6000,-2000,-3000,-2000, 6000, 1000},
 		{    0, 1000, 6000, 6000, 6000, 1000,    0}
-
 	},
-	{
+	{ {    0, 6000, 6000, 6000,    0},  //topology 1, 5×9
+		{ 6000,-3000,-3000, 6000,    0},
+		{ 6000,-3000,-3000,-3000, 6000},
+		{-3000,-3000,-3000,-3000,    0},
+		{ 6000,-3000, 7000,-3000, 6000},  //EVEN line in tile[][]
+		{-3000,-3000,-3000,-3000,    0},
+		{ 6000,-3000,-3000,-3000, 6000},
+		{ 6000,-3000,-3000, 6000,    0},
+		{    0, 6000, 6000, 6000,    0}
 	},
-	{
+	{ {    0,    0, 5000, 6000, 6000, 5000,    0},   //topology 2,  7×7
+		{    0, 6000,-2000,-3000,-2000, 6000,    0},
+		{    0, 6000,-3000,-3000,-3000,-3000, 6000},
+		{ 5000,-2000,-3000, 7000,-3000,-2000, 5000},   //ODD line in tile[]
+		{    0, 6000,-3000,-3000,-3000,-3000, 6000},
+		{    0, 6000,-2000,-3000,-2000, 6000,    0},
+		{    0,    0, 5000, 6000, 6000, 5000,    0}
 	},
-	{
+	{ {    0,    0, 5000,    0},   //topology 3,  4×13
+		{    0, 6000, 6000,    0},
+		{    0, 6000,-2000, 6000},
+		{ 5000,-3000,-3000, 5000},
+		{    0,-2000,-3000,-2000},
+		{ 6000,-3000,-3000, 6000},
+		{    0,-3000, 7000,-3000},   //EVEN line in tile[]
+		{ 6000,-3000,-3000, 6000},
+		{    0,-2000,-3000,-2000},
+		{ 5000,-3000,-3000, 5000},
+		{    0, 6000,-2000, 6000},
+		{    0, 6000, 6000,    0},
+		{    0,    0, 5000,    0}
 	}
 };
+
+/* Arrays indexed by topology number */
+int asteroidx[4] = {7, 5, 7, 4};     //columns in strike map
+int asteroidy[4] = {7, 9, 7, 13};    //rows in strike map
+int asteroid_yadj[4] = {0, 2, 1, 2}; //0: any y, 1: odd y, 2: even y
+
 
 void fail(char *s) {
 	printf("%s\n", s);
@@ -1545,10 +1589,24 @@ bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *new
 
 void asteroid_strike(tiletype tile[mapx][mapy]) {
 	int x = random() % mapx;
-	int y = random() % mapy;x=2;y=2;
-	printf("DBG asteroid strike at %i,%i\n",x,y);
-	for (int cx = -3; cx <=3 ; ++cx) for (int cy = -3; cy <= 3; ++cy) {
-		short heightchange = chicxulub[0][cx+3][cy+3];
+	int y = random() % mapy;
+	switch (asteroid_yadj[topo]) {
+		case 0:
+			break;
+		case 1:
+			y |= 1;
+			break;
+		case 2:
+			y &= ~1;
+			break;
+	}
+	printf("Asteroid strike at %i,%i\n",x,y);
+	int xstart = -(asteroidx[topo] / 2);
+	int xend   = asteroidx[topo] + xstart - 1;
+	int ystart = -(asteroidy[topo] / 2);
+	int yend   = asteroidy[topo] + ystart - 1;
+	for (int cx = xstart; cx <= xend ; ++cx) for (int cy = ystart; cy <= yend; ++cy) {
+		int heightchange = (int)chicxulub[topo][cy-ystart][cx-xstart];
 		int nx = wrap(x+cx, mapx);
 		int ny = wrap(y+cy, mapy);
 		tile[nx][ny].height += heightchange;
@@ -1716,7 +1774,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	neighpostype *np = nposition[topo];
 	/* Move plates */
 	printf("Plate tectonics with %i plates\n", plates);
-	int asteroids = 1;
+	int asteroids = mapx / 16;
 	for (int i = 1; i <= rounds; ++i) {
 		//Move the plates
 		for (int p = 0; p < plates; ++p) {
@@ -1741,10 +1799,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			}
 		}
 		/* Run weather & erosion */
-		if (asteroids && i==14) {
+		if (asteroids && !(random() % (mapx/16)) ) {
 			--asteroids;
-			//So far, only topology 0
-			if (topo == 0 || topo == 10) asteroid_strike(tile);
+			asteroid_strike(tile);
 		}
 #ifdef DBG		
 		printf("weather, round %i\n",i);
