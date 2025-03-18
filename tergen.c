@@ -337,8 +337,12 @@ neighbourtype n1o[] = {{ 0,-1},{1,-1},{ 0,1},{1, 1},{0,-2},{-1,0},{0,2},{0,1}};
 neighbourtype n1e[] = {{-1,-1},{0,-1},{-1,1},{0, 1},{0,-2},{-1,0},{0,2},{0,1}};
 neighbourtype n2o[] = {{ 0,-1},{1,-1},{-1,0},{1,0},{ 0,1},{1,1}};
 neighbourtype n2e[] = {{-1,-1},{0,-1},{-1,0},{1,0},{-1,1},{0,1}};
-neighbourtype n3o[] = {{0,-2},{ 0,-1},{1,-1},{ 0,1},{1,1},{0,2}};
-neighbourtype n3e[] = {{0,-2},{-1,-1},{0,-1},{-1,1},{0,1},{0,2}};
+
+//neighbourtype n3o[] = {{0,-2},{ 0,-1},{1,-1},{ 0,1},{1,1},{0,2}};
+//neighbourtype n3e[] = {{0,-2},{-1,-1},{0,-1},{-1,1},{0,1},{0,2}};
+
+neighbourtype n3o[] = {{1,1},{0,2},{ 0,1},{ 0,-1},{0,-2},{1,-1}};
+neighbourtype n3e[] = {{0,1},{0,2},{-1,1},{-1,-1},{0,-2},{0,-1}};
 
 neighbourtype *nodd[4] = {n0o, n1o, n2o, n3o};
 neighbourtype *nevn[4] = {n0e, n1e, n2e, n3e};
@@ -347,7 +351,9 @@ neighbourtype *nevn[4] = {n0e, n1e, n2e, n3e};
 neighpostype np0[8] = {{180},{90},{270},{0},{225},{135},{315},{45}};
 neighpostype np1[8] = {{225},{315},{135},{45},{270},{180},{90},{0}};
 neighpostype np2[6] = {{240},{300},{180},{0},{120},{60}};
-neighpostype np3[6] = {{270},{210},{330},{150},{30},{90}};
+
+//neighpostype np3[6] = {{270},{210},{330},{150},{ 30},{ 90}};
+neighpostype np3[6] = {{ 30},{ 90},{150},{210},{270},{330}};
 
 neighpostype *nposition[4] = {np0, np1, np2, np3};
 
@@ -1182,9 +1188,18 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 //Ensures recursively that mountains stay below 10000m when plates collide.
 //Spill the excess onto neighbours, then check them too.
+/*
+Problem: There is no use spilling excess height onto tiles about to be
+overwritten by plate movement. (interior plate tiles).
+Excess may always be transferred in the direction of movement.
+The two closest directions to either side ought to be safe too.
+Requires that directions are ordered.
+	 */
 void mountaincheck(int x, int y, tiletype tile[mapx][mapy]) {
 	tiletype *this = &tile[x][y];
 	if (this->height > 10000) {
+		//This mountain will be cut down to the 8000–9000 range.
+		//The excess is scattered.
 		short excess = this->height - 9000 + (random() & 1023);
 		this->height -= excess;
 		excess /= neighbours[topo];
@@ -1233,11 +1248,12 @@ void moveplate(platetype *pl, int direction, tiletype tile[mapx][mapy]) {
 	
 	//double loop for the area containing this plate
 	//Must handle cases with stop and start on the same tile!
+	//(A plate sometimes wraps around a small world.)
 	int x = startx;
 	do {
 		int y = starty;
 		do {
-			int nxy,nxx;
+			int nxy,nxx; //next y, next x
 			tiletype *this, *next, *prev;
 			this = &tile[x][y];
 			if (this->plate == pl->ix) { //Tile on this plate
@@ -1271,7 +1287,7 @@ void moveplate(platetype *pl, int direction, tiletype tile[mapx][mapy]) {
 						if (!(random() & 7)) next->plate = this->plate;
 
 					}
-				} else *next = *this;
+				} else *next = *this; //moves the entire tile
 
 				//Is this trailing?
 				if (prev->plate != pl->ix) {
@@ -1805,6 +1821,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		}
 #ifdef DBG		
 		printf("weather, round %i\n",i);
+		printf("evaporation\n");
 #endif
 		//Terrain changed last round, recompute land/sea and sea level
 		int seaheight = sealevel(tp, land, tile, weather);
@@ -1833,7 +1850,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			ab->water += cloudcap;
 			if (t->terrain == 'm') t->wetness -= cloudcap;
 		}
-
+#ifdef DBG
+		printf("move clouds\n");
+#endif
 		//Move clouds using prevailing winds, random winds & sea breeze
 		//A cloud hitting a mountain moves up as well
 		for (int h=0; h < 9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
@@ -1899,7 +1918,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				}
 			}
 		}
-
+#ifdef DBG
+		printf("add up clouds, then rain\n");
+#endif
 		//Add moved water to cloudwater, then let the clouds rain, wetting the ground
 		for (int h = 0; h<9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			//Skip airboxes that are underground:
@@ -1929,7 +1950,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				}
 			}
 		}
-		
+#ifdef DBG
+		printf("run rivers\n");
+#endif	
 
 		//Let some ground wetness run off in rivers. A steep tile
 		//drains faster than one in flat terrain. (height difference to lowest neighbour)
@@ -1940,6 +1963,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			tiletype *t = &tile[x][y];
 			//skip sea tiles
 			if (t->terrain == ':') continue;
+#ifdef DBG
+			printf("find_next_rivertile x=%i y=%i\n",x,y);
+#endif
 			//Find lowest neighbour & steepness.  
 			find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
 			/*Less runoff from flat land, more from steeper, most from mountains. But not all.
@@ -1954,7 +1980,21 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			int prev_x = x, prev_y = y;
 			int pprevx = -1, pprevy = -1;
 			int rocks = 0;
+#ifdef DBG
+			printf("if waterflow..\n");
+#endif
+/*
+BUG!!!
+./tergen test 13 0 80 80 42 29
+river runs in a triangle, three lake tiles with exactly the same height.
 
+New approach needed:
+Water must go to a strictly lower tile, otherwise create a lake.
+Lakes may exit through a higher tile, BUT the exit must be strictly
+lower than where the water came in.  If not, attempt a dambreak. 
+And if that fails, end with a dead sea. (Or flood fill the terrain, someday)
+
+*/	 
 			//Now send this to the ocean, accumulating flow along the way:
 			if (waterflow) do {
 				/* Move water to the lowest neighbour.
@@ -1972,6 +2012,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				//Is the lowest neighbour tile higher up?
 				if (tile[nx][ny].height >= t->height) {
 					t->terrain = '+'; //This is a hole, make a lake
+					//ideally, fill up the terrain...
 				}
 				//If we hit a lake, drop the rocks
 				if (t->terrain == '+') {
@@ -2006,18 +2047,29 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 						The river continues on success, or creates a dead sea
 						on failure.
 					*/
+#ifdef DBG
+					printf("attempt dambreak..\n");
+#endif
 					if (!river_dambreak(prev_x, prev_y, tile, &nx, &ny)) break;
 					//A lower neighbour was created, this is no longer a lake
 					tile[prev_x][prev_y].terrain = 'm';
 				}
 				pprevx = prev_x; pprevy = prev_y; prev_x = nx; prev_y = ny; 
 				t = &tile[prev_x][prev_y];
+#ifdef DBG
+				printf("find_next_rivertile prev_x=%i prev_y=%i height=%i (%c)..\n",prev_x,prev_y,tile[prev_x][prev_y].height, tile[prev_x][prev_y].terrain);
+#endif
 				find_next_rivertile(prev_x, prev_y, tile, seaheight);
 			} while (t->terrain != ':'); //Stop river upon reaching the sea
+#ifdef DBG
+			printf("end of waterflow\n");
+#endif
 			t->waterflow += waterflow;
 			t->height += rocks; 
 		} //end of rivers
-
+#ifdef DBG
+		printf("erode terrain\n");
+#endif
 		//Use water flow to erode the terrain
 		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			tiletype *t = &tile[x][y];
