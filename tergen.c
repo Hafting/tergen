@@ -266,7 +266,7 @@ void my_sincosf(float x, float *sinx, float *cosx) {
 
 
 typedef struct {
-	short height; //Meters above lowest sea bottom. Max 10000
+	short height; //Meters above lowest sea bottom. Range 0–10000
 	char terrain; //Freeciv terrain letter
 	char plate;   //id of tectonic plate this tile belongs to
 	char mark; //for depth-first search, volcano calculations etc.
@@ -274,8 +274,8 @@ typedef struct {
 	char lowestneigh; //direction of lowest neighbour
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
 	char temperature; //in celsius
-	int wetness; //rainfall adds, evaporation subtracts
-	int waterflow; //amount in rivers. From rain, plus flow from other tiles
+	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
+	int waterflow; //amount in rivers. Wetness running of, plus incoming flow from higher tiles
 	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
 	short rocks; //erosion, rocks following the rivers
 } tiletype;
@@ -465,6 +465,12 @@ float frand(float min, float max) {
 	return min + random() * range / RAND_MAX;
 }
 
+//Recover (x,y) from a pointer into the tile array
+void recover_xy(tiletype tile[mapx][mapy], tiletype *t, int *x, int *y) {
+	int diff = t - &tile[0][0];
+	*y = diff % mapy;
+	*x = diff / mapy;
+}
 
 /* Make a tectonic plate, not too close to other plates. */
 int mkplate(int const plates, int const ix, platetype plate[plates]) {
@@ -712,13 +718,13 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 //x% of the tiles are sea, so the last sea tile gives the sea height.
 //Also determine tile temperatures based on being sea or land
 //Done every round, as erotion & tectonics change tile heights & sea level
-int sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy]) {
+short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy]) {
 	//Find the sea level by sorting on height. "land" is the percentage of land tiles
 	int tilecnt = mapx*mapy;
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
 	int landtiles = land * tilecnt / 100;
 	int seatiles = tilecnt - landtiles;
-	int level = tp[seatiles ? seatiles-1 : 0]->height;
+	short level = tp[seatiles ? seatiles-1 : 0]->height;
 
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
@@ -734,7 +740,7 @@ int sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weath
 		if (tile[x][y].terrain == ':') tile[x][y].temperature = weather[x][y].sea_temp;
 		else tile[x][y].temperature = weather[x][y].land_temp - (tile[x][y].height-level)/100;
 	}
-	//two rounds of averaging. Sea may thaw frozen land, land may freeze some sea.
+	//two rounds of averaging. Sea may thaw slightly frozen land, very cold land may freeze some sea.
 	signed char tmptemp[mapx][mapy];
 	int half = (neighbours[topo]+2)/2;
 	memset(tmptemp, 0, mapx*mapy*sizeof(signed char));
@@ -1041,11 +1047,11 @@ void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
 	//Pass 1
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
+		t->mark = 0;
 		if (!t->river && (t->terrain == 'm' || t->terrain == 'h' || t->terrain == 'A' || t->terrain == 'T'
 		               || t->terrain == 'F' || t->terrain == 'J' || t->terrain == 'D')) {
 			//Tile is high, and no river. Check if it is on a plate edge
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-			t->mark = 0;
 			for (int n = 0; n < neighbours[topo]; ++n) {
 				int nx = wrap(x+nb[n].dx, mapx);
 				int ny = wrap(y+nb[n].dy, mapy);
@@ -1067,7 +1073,6 @@ void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
 			if ( (r % chance) < 16) t->terrain = 'v';
 		}
 	}
-
 }
 
 /*
@@ -1521,13 +1526,17 @@ int pushcloud(int h, int x, int y, int amount, int abovesea, airboxtype air[mapx
 /*
 	Find next tile in a river flow. If there is nothing else, use the lowest neighbour.
 	If there is a neighbour river with more flow, merge into that instead, as long is it is on a lower tile.  Such coalescing improves the river systems a lot.
+
 	Running into the sea is preferred over merging into another river.
+
 	Also calculate steepness, based on the height difference between this tile and the outflow tile. Steepness is used for erosion, and for deciding how much of the wetness that leaves in the river.
+
+	The outflow tile may not be lower than this, if this tile is lower than all neighbours. That is a problem for the caller to solve.
 */
 void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheight) {
 	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-	char lownb = 0;
-	char flowlownb = -127;
+	char lownb = 0;        //Finds the lowest neighbour tile
+	char flowlownb = -127; //Finds the best river to merge with (most flow, and on a lower tile)
 	int maxflow = 1;
 	short lowheight = 32767; //Higher than highest, some neighbour will be chosen
 	tiletype *t = &tile[x][y];
@@ -1570,15 +1579,16 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
   neighbour	so the river may escape that way.
 	Return true on success, false on failure.
 */
-bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *newy) {
-	short maxheight = tile[x][y].height - 2; // "-2" avoids loops, allow only strictly lower tiles
+bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *newx, int *newy) {
+	short maxheight = below - 2; // "-2" avoids loops, allow only strictly lower tiles
 	int mmx, mmy;
 	neighbourtype *nb0 = (y & 1) ? nodd[topo] : nevn[topo];
-	for (int n = 0; n < neighbours[topo]; ++n) {
+	char newneighbour;
+	for (char n = 0; n < neighbours[topo]; ++n) {
 		int nx = wrap(x + nb0[n].dx, mapx);
 		int ny = wrap(y + nb0[n].dy, mapy);
 		neighbourtype *nb1 = (ny & 1) ? nodd[topo] : nevn[topo];
-		for (int m = 0; m < neighbours[topo]; ++m) {
+		for (char m = 0; m < neighbours[topo]; ++m) {
 			int mx = wrap(nx + nb1[m].dx, mapx);
 			int my = wrap(ny + nb1[m].dy, mapy);
 			//Find the lowest neighbour of near neigbour.
@@ -1591,15 +1601,18 @@ bool river_dambreak(int x, int y, tiletype tile[mapx][mapy], int *newx, int *new
 				*newy = ny;
 				mmx = mx;
 				mmy = my;
+				newneighbour = n;
 			}
 		}
 	}
-	if (maxheight == tile[x][y].height - 2) return false; //Found no way out.
+	if (maxheight == below - 2) return false; //Found no way out.
 	//Break the dam
-	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
+//	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
+	short newheight = (below + tile[mmx][mmy].height) / 2;
 	int rocks = tile[*newx][*newy].height - newheight;
 	tile[*newx][*newy].height = newheight;
-	tile[*newx][*newy].rocks = rocks;
+	tile[*newx][*newy].rocks += rocks;
+	tile[x][y].lowestneigh = newneighbour;
 	return true;
 }
 
@@ -1628,8 +1641,168 @@ void asteroid_strike(tiletype tile[mapx][mapy]) {
 		tile[nx][ny].height += heightchange;
 		if (tile[nx][ny].height < 0) tile[nx][ny].height = 0;
 		else if (tile[nx][ny].height > 10000) mountaincheck(nx, ny, tile);
+		if (tile[nx][ny].terrain == '+') tile[nx][ny].terrain = 'm'; //Lakes do not survive strikes
 	}
 }
+
+/*
+Running rivers:
+Sort tiles on height. Already done when sealevel was calculated, "tp" has tile pointers sorted on height.
+
+Iterate through land tiles (prep):
+  recover x,y from tile pointer
+  "wetness" is accumulated rainfall. use find_next_rivertile() to set steepness. Calculate waterflow originating here based on wetness and steepness. Reset marks. Unmarked means this tile has not yet flowed to sea.
+
+Iterate through land tiles again, highest to lowest.
+  marked tile, or no water to move? Skip to the next tile
+  recover x,y from tile pointer
+  Have movable water, it must now move to the sea (or a dead sea lake):
+  from_height = 20000
+  do {  //river loop
+		accumulate movable water from this tile
+	  accumulate eroded rocks from this tile
+		if next tile is higher, create a lake here
+    if this is a lake:
+		   drop most rocks. But fill no more than to min(from_height-1, or next tile height+1)
+			 if filled to next tile height+1, change the lake back to terrain. It filled up with rocks.
+	  if (next tile height < from_height) {
+			drop some rocks depending on steepness. Fill no more than to from_height-1
+		} else {
+			Next tile is higher than the lake inlet :-(
+			Attempt a dam break: Find lowest of neighbours of neighbours. If lower than from_height {
+			  Break the dam, by lowering the neighbour to between from_height-1 and second neighbour height+1
+				accumulate the height difference as a large amount of rocks
+				set the this tile's next tile to be that neighbour.
+			} else {
+			   Give up, this is now the dead sea!
+				 Future approach: flood fill the landscape, create BIG lakes until some outlet is found.
+			}
+			from_height = max(this heigh, next tile height)
+			tile = next ; and go on with the river loop
+		}
+  } while !sea
+*/
+
+//Let rain water flow from every tile to the sea.
+//tp is pointers into the tile array, sorted on height. Tallest is last.
+//unmarked tiles have unmoved water. marked tiles has a precomputed path for water flow
+void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
+	//Iterate through land tiles, prepare waterflow, find river directions, clear marks
+  for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
+		tiletype *t = tp[i];
+		int x, y;
+		recover_xy(tile, t, &x, &y);
+		//Find lowest neighbour & steepness.
+		find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
+		/*Less runoff from flat land, more from steeper, most from mountains. But not all.
+			Steepness from -1 to 14. 3/(7-steepness/4) yields 4/7, 3/7, 3/6, 3/5, 3/4
+		 */
+		int waterflow = 3*t->wetness / (7 - t->steepness/4);
+		t->wetness -= waterflow;
+		//More emphasis to rivers composed from several tiles, than a single large mountain
+		//looks better, and we get rivers in cold regions too
+		//printf("flow  %5i   -> ",waterflow);
+		if (waterflow) waterflow = sqrtf(sqrtf(waterflow)); //less agressive than log2
+																												//printf("%5i\n", waterflow);
+		/*
+Problem:  That fourth root is fine for deciding where we get a river, and where we don't.
+But it makes "water economy" impossible.
+And every change here, must be followed up with changes to erosion!
+
+Solution: maintain two waterflows:
+- the real waterflow, based on wetness and summed along the way
+Used for calculating erosion and possibly for filling lakes
+- a reduced flow, based on ad-hoc corrections, summed along the way
+Used for assigning river tiles and nothing else.
+
+Postponed to later, as there is a real bug to solve first.
+		 */
+		t->waterflow = waterflow;
+		t->mark = 0;
+	}
+
+	//Iterate through land tiles again. This time, run rivers to the sea.
+	//Re-route rivers in case of obstacles (BIG lakes would be better)
+  for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
+		tiletype *t = tp[i];
+		if (t->mark || !t->waterflow) continue;
+		int x, y;
+		recover_xy(tile, t, &x, &y);
+		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
+		int flow = 0;
+		short rocks = 0;
+		do {
+			//Accumulate waterflow & rocks
+			t->waterflow += flow;
+			if (!t->mark) flow = t->waterflow; //Accumulate only the first time
+			rocks += t->rocks;
+			t->rocks = 0;
+			t->mark = 1; //Been here...
+
+			//Did we previously hit a dead end here?
+			if (t->lowestneigh == -1) {
+				break; //No progress possible, water stops here!
+			}
+
+			//Look up the next tile
+			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+			int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
+			int ny = wrap(y + nb[t->lowestneigh].dy, mapy);
+			tiletype *next = &tile[nx][ny];
+
+			//If the outlet is higher up, make a lake
+			if (next->height > t->height) t->terrain = '+';
+
+			if (t->terrain == '+') { //if this is a lake...
+				//Drop lots of rocks when hitting a lake
+				//Don't fill beyond from_height-1
+				//if we fill past next height+1, destroy the lake
+				short drop = rocks;
+				short maxdrop1 = from_height-1 - t->height;
+				drop = (drop <= maxdrop1) ? drop : maxdrop1;
+				short maxdrop2 = next->height+1 - t->height;
+				drop = (drop < maxdrop2) ? drop : maxdrop2;
+				rocks -= drop;
+				t->height += drop;
+				//Destroy the lake if we filled it up:
+				if (t->height >= next->height+1) t->terrain = 'm';
+			}
+
+			if (next->height < from_height) {
+				//The river goes on to the next tile the normal way.
+				//Drop some rocks depending on steepness, but don't fill over from_height-1
+				short drop = rocks / (t->steepness/4 + 2);
+				short maxdrop = from_height-1 - t->height;
+				drop = (drop <= maxdrop) ? drop : maxdrop;
+				rocks -= drop;
+				t->height += drop;
+			} else {
+				//Next tile is higher than this tile's inlet. The river is trapped. :-(
+				//Attempt a dam break: (Better: create a BIG lake)
+				if (river_dambreak(x, y, from_height, tile, &nx, &ny)) {
+					//Success, the river found a new way!
+					//Check if the tile is land or lake after the obstacle broke
+					next = &tile[nx][ny];
+					t->terrain = (t->height <= next->height) ? '+' : 'm';
+				} else {
+					//Failure, so the river must STOP here
+					t->lowestneigh = -1;
+					break;
+				}
+
+			}
+			from_height = (t->height > next->height) ? t->height : next->height;
+			//Make the next tile current:
+			t = next;
+			x = nx; y = ny;
+
+		} while (t->terrain != ':');
+		//Deposit rocks wherever we ended.  Ideally, check if the sea tile filled up. But next round will do that anyway.
+		//A last round cleanup, to make sure rivers don't stop short of the sea?
+		t->height += rocks;
+	}
+}
+
 
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Phase 1: initialization
@@ -1680,7 +1853,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		//Nice irregular pattern, breaks up repetition:
 		float h2 =  cosf(fxb*1.8*(1.0+sinf(fyb+yphase)/2))*cosf(fyb*1.8*(1.0+sinf(fxb+xphase)/2));
 
-		//High frequency noise, more variation:
+		//High frequency noise, for more variation:
 		float h3 =  sinf(fxb*13+frndy)*sinf(fyb*13+frndx);
 //		tile[x][y].height = 4000 + 1000*h1 + 1400*h2 + 1000*h3*h2; // 600..7400
 		tile[x][y].height = 2000 + 500*h1 + 700*h2 + 500*h3*h2; // 300..3700
@@ -1824,14 +1997,14 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		printf("evaporation\n");
 #endif
 		//Terrain changed last round, recompute land/sea and sea level
-		int seaheight = sealevel(tp, land, tile, weather);
+		int seaheight = sealevel(tp, land, tile, weather);  //After this, tp is sorted on height.
 		//Evaporate water from all tiles, deposit into air above
 		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			tiletype *t = &tile[x][y];
 			//Also reset steepness & waterflow for later steps;
 			t->steepness = -1;
 			//Fourth root of int will fit in a byte, and if
-			//a>b, then the same holds for the fourth roots.
+			//a>=b, then the same holds for the fourth roots.
 			t->oldflow = sqrtf(sqrtf(t->waterflow));
 			t->waterflow = 0;
 
@@ -1842,7 +2015,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			airboxtype * const ab = &air[x][y][airix];
 			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
 			if (cloudcap < 0) cloudcap = 0;
-			//found the cloud capacity over this tile. But do not evaporate too much of a land tile:
+			//Found the cloud capacity over this tile. Sea and lake will evaporate to fill this capacity.
+			//Land tiles loose no more than 1/3 of their water to evaporation.
 			if (t->terrain == 'm') {
 			 	if (t->wetness/3 < cloudcap) cloudcap = t->wetness/3;
 			}
@@ -1919,7 +2093,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			}
 		}
 #ifdef DBG
-		printf("add up clouds, then rain\n");
+		printf("add up clouds, let it rain\n");
 #endif
 		//Add moved water to cloudwater, then let the clouds rain, wetting the ground
 		for (int h = 0; h<9; ++h) for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
@@ -1953,120 +2127,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 #ifdef DBG
 		printf("run rivers\n");
 #endif	
-
-		//Let some ground wetness run off in rivers. A steep tile
-		//drains faster than one in flat terrain. (height difference to lowest neighbour)
-		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-			//Find the lowest neighbour, which is where the water will go.
-			//Also calculate the steepness as the height difference.
-			//More wetness run off from steep terrain
-			tiletype *t = &tile[x][y];
-			//skip sea tiles
-			if (t->terrain == ':') continue;
-#ifdef DBG
-			printf("find_next_rivertile x=%i y=%i\n",x,y);
-#endif
-			//Find lowest neighbour & steepness.  
-			find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
-			/*Less runoff from flat land, more from steeper, most from mountains. But not all.
-				Steepness from 0 to 14. 3/(7-steepness) yields 3/8, 3/7, 3/6, 3/5, 3/4
-				*/
-			int waterflow = 3*t->wetness / (7 - t->steepness/4);
-			t->wetness -= waterflow;
-			//More emphasis to rivers composed from several tiles, than a single large mountain
-			//looks better, and more rivers in cold regions
-			//			if (waterflow)  waterflow = 1 + log2(waterflow); 
-			if (waterflow) waterflow = sqrtf(sqrtf(waterflow)); //less agressive than log2
-			int prev_x = x, prev_y = y;
-			int pprevx = -1, pprevy = -1;
-			int rocks = 0;
-#ifdef DBG
-			printf("if waterflow..\n");
-#endif
-/*
-BUG!!!
-./tergen test 13 0 80 80 42 29
-river runs in a triangle, three lake tiles with exactly the same height.
-
-New approach needed:
-Water must go to a strictly lower tile, otherwise create a lake.
-Lakes may exit through a higher tile, BUT the exit must be strictly
-lower than where the water came in.  If not, attempt a dambreak. 
-And if that fails, end with a dead sea. (Or flood fill the terrain, someday)
-
-*/	 
-			//Now send this to the ocean, accumulating flow along the way:
-			if (waterflow) do {
-				/* Move water to the lowest neighbour.
-					 if the lowest neighbour is higher up, this becomes a lake.
-					 If the lake's lowest neighbour is where the water came in,
-					 we're stuck. Attempt a dam break, if that doesn't work 
-					 give up and create the dead sea.
-				*/
-				neighbourtype *nb = (prev_y & 1) ? nodd[topo] : nevn[topo];
-				t->waterflow += waterflow;
-				rocks += t->rocks;
-				t->rocks = 0;
-				int nx = wrap(prev_x + nb[t->lowestneigh].dx, mapx);
-				int ny = wrap(prev_y + nb[t->lowestneigh].dy, mapy);
-				//Is the lowest neighbour tile higher up?
-				if (tile[nx][ny].height >= t->height) {
-					t->terrain = '+'; //This is a hole, make a lake
-					//ideally, fill up the terrain...
-				}
-				//If we hit a lake, drop the rocks
-				if (t->terrain == '+') {
-					t->height += rocks;
-					rocks = 0;
-					//Did we fill this lake?
-					if (tile[nx][ny].height < t->height) {
-						//Let some rocks go downstream
-						int excess = (t->height - tile[nx][ny].height);
-						rocks = excess/3;
-						t->height -= rocks;
-						t->terrain = 'm';
-					}
-				} else {
-					//Drop some rocks, depending on steepness
-					int drop = rocks / (t->steepness/4 + 2);
-					rocks -= drop;
-					t->height += drop;
-				}
-				if (nx == pprevx && ny == pprevy) {
-					/*
-						Loop detected. water is on tile prev_x, prev_y, and it came
-						in from pprevx,pprevy.  Unfortunately, the lowest neighbour
-						(nx,ny) for this tile is the same as pprevx,pprevy
-						so no progress is possible.
-
-						Check if we can break the dam. If some neighbour's neighbour
-						is sea or a lower elevation than t: reduce the neighbour's
-						height to between t and the neighbour's neighbour. Then, route
-						the river through the lowered neighbour.
-
-						The river continues on success, or creates a dead sea
-						on failure.
-					*/
-#ifdef DBG
-					printf("attempt dambreak..\n");
-#endif
-					if (!river_dambreak(prev_x, prev_y, tile, &nx, &ny)) break;
-					//A lower neighbour was created, this is no longer a lake
-					tile[prev_x][prev_y].terrain = 'm';
-				}
-				pprevx = prev_x; pprevy = prev_y; prev_x = nx; prev_y = ny; 
-				t = &tile[prev_x][prev_y];
-#ifdef DBG
-				printf("find_next_rivertile prev_x=%i prev_y=%i height=%i (%c)..\n",prev_x,prev_y,tile[prev_x][prev_y].height, tile[prev_x][prev_y].terrain);
-#endif
-				find_next_rivertile(prev_x, prev_y, tile, seaheight);
-			} while (t->terrain != ':'); //Stop river upon reaching the sea
-#ifdef DBG
-			printf("end of waterflow\n");
-#endif
-			t->waterflow += waterflow;
-			t->height += rocks; 
-		} //end of rivers
+		run_rivers(seaheight, tile, tp);
 #ifdef DBG
 		printf("erode terrain\n");
 #endif
@@ -2076,6 +2137,7 @@ And if that fails, end with a dead sea. (Or flood fill the terrain, someday)
 			//More water moves more rocks. And more with more steepness
 			if (t->terrain == 'm') {
 				t->rocks = sqrtf(sqrtf(t->waterflow * t->steepness));
+//printf("rocks: %5i\n",t->rocks);
 				t->height -= t->rocks;
 			}
 		}
