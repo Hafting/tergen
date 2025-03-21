@@ -1207,29 +1207,28 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	output_terrain(f, tile, true);
 }
 
-//Ensures recursively that mountains stay below 10000m when plates collide.
+//Ensures recursively that mountains stay below 10000m when plates collide,
+//or an asteroid strikes.
 //Spill the excess onto neighbours, then check them too.
-/*
-Problem: There is no use spilling excess height onto tiles about to be
-overwritten by plate movement. (interior plate tiles).
-Excess may always be transferred in the direction of movement.
-The two closest directions to either side ought to be safe too.
-Requires that directions are ordered.
-	 */
-void mountaincheck(int x, int y, tiletype tile[mapx][mapy]) {
+//Asteroid: spread in all directions, direction==-1
+//Plate movement: spread in direction of plate movement, and two side directions
+void mountaincheck(int x, int y, int direction, tiletype tile[mapx][mapy]) {
 	tiletype *this = &tile[x][y];
 	if (this->height > 10000) {
 		//This mountain will be cut down to the 8000–9000 range.
 		//The excess is scattered.
 		short excess = this->height - 9000 + (random() & 1023);
 		this->height -= excess;
-		excess /= neighbours[topo];
+		excess /= (direction == -1) ? neighbours[topo] : 3;
 		neighbourtype *neigh = (y & 1) ? nodd[topo] : nevn[topo];
-		for (int i = neighbours[topo]; i-- > 0;) {
-			int nx = wrap(x+neigh[i].dx, mapx);
-			int ny = wrap(y+neigh[i].dy, mapy);
+		int istart = (direction == -1) ? 0 : direction-1;
+		int istop = (direction == -1) ? neighbours[topo]-1 : direction+1;
+		for (int i = istart; i <= istop; ++i) {
+			int ix = (i + neighbours[topo]) % neighbours[topo]; //Stay within 0..neighbours[topo]-1, either end may be outside
+			int nx = wrap(x+neigh[ix].dx, mapx);
+			int ny = wrap(y+neigh[ix].dy, mapy);
 			tile[nx][ny].height += excess;
-			mountaincheck(nx, ny, tile);
+			mountaincheck(nx, ny, direction, tile);
 		}
 	}
 }
@@ -1296,7 +1295,7 @@ void moveplate(platetype *pl, int direction, tiletype tile[mapx][mapy]) {
 				//Is this a leading tile?
 				if (next->plate != pl->ix) {
 					next->height += this->height;
-					mountaincheck(nxx, nxy, tile);
+					mountaincheck(nxx, nxy, direction, tile);
 					//Try to avoid long perfectly straight mountain ranges:
 					if (next->plate == 0) {
 						//Normally, take the tile so the plate seems to move forward.
@@ -1656,7 +1655,7 @@ void asteroid_strike(tiletype tile[mapx][mapy]) {
 		int ny = wrap(y+cy, mapy);
 		tile[nx][ny].height += heightchange;
 		if (tile[nx][ny].height < 0) tile[nx][ny].height = 0;
-		else if (tile[nx][ny].height > 10000) mountaincheck(nx, ny, tile);
+		else if (tile[nx][ny].height > 10000) mountaincheck(nx, ny, -1, tile);
 		if (tile[nx][ny].terrain == '+') tile[nx][ny].terrain = 'm'; //Lakes do not survive strikes
 	}
 }
