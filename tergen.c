@@ -489,19 +489,21 @@ void recover_xy(tiletype tile[mapx][mapy], tiletype *t, int *x, int *y) {
 }
 
 /* Make a tectonic plate, not too close to other plates. */
-int mkplate(int const plates, int const ix, platetype plate[plates]) {
+int mkplate(int const plates, int const ix, platetype plate[plates], int platedist) {
 	//Up to 5 tries, or give up. Fewer plates is not a problem
-	int tries = 5+1;
+	int tries = 15+1;
+	int sq_p_dist = platedist * platedist * 2 * 64 / 81 / 3;
+	float movedist = (platedist/2.0 + 1)/rounds;
 	while (--tries) {
 		float x = frand(0, mapx); 
 		float y = frand(0, mapy); 
 		//Distance test
-		for (int i = 0; i < ix; ++i) if (sqdist(x,y,plate[i].cx,plate[i].cy) < 64) goto tryagain;
+		for (int i = 0; i < ix; ++i) if (sqdist(x,y,plate[i].cx,plate[i].cy) < sq_p_dist) goto tryagain;//64
 		plate[ix].cx = plate[ix].ocx = x;
 		plate[ix].cy = plate[ix].ocy = y;
 		plate[ix].ix = ix + 1;
-		plate[ix].vx = frand(-5.0/rounds,5.0/rounds);
-		plate[ix].vy = frand(-5.0/rounds,5.0/rounds);
+		plate[ix].vx = frand(-movedist,movedist);// 5.0/rounds
+		plate[ix].vy = frand(-movedist,movedist);
 		plate[ix].rx = plate[ix].ry = 0;
 		break;
 		tryagain:;
@@ -1903,7 +1905,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//Phase 2: plate tectonics, weather & erosion
 	//Make the tectonic plates
 	int plates = 3 * (mapx+mapy) / 32; //3, for the smallest (16×16) map
-	if (plates > 255) plates = 255;
+
+	//Area divided by plates, is area per plate. The root gives a diameter
+	int plate_dist = sqrtf(mapx*mapy/plates); //9, for the smallest map. 20, for 80x80
+	//(platedist-2)^2 min.sep?
+	//(platedist+1)/2 
+printf("plates: %i   platedist: %i\n",plates,plate_dist);
+	if (plates > 254) plates = 254;
 
 	printf("Plate tectonics, trying %i plates\n", plates);
 	platetype plate[plates];
@@ -1911,7 +1919,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	while (!done) {
 		int i = 0;
   	for (i = 0; i < plates; ++i) {
-			if (!mkplate(plates, i, plate)) break;
+			if (!mkplate(plates, i, plate, plate_dist)) break;
 		} 
 		if (i >= 3) {
 			plates = i;
