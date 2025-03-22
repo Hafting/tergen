@@ -44,6 +44,8 @@ Isometric seems to double the with and halve the height. Compensate by changing 
 
 Add 10 to use extended terrain features. The terrain may then have hills of many types, such as desert hills, polar hills and so on. There are also volcanoes. You will need a tileset and a ruleset providing such graphics; this is avaliable from my [freecivstuff](https://github.com/Hafting/freecivstuff) repository. 
 
+Currently, only 13 (isometric hex tiles) have tileset support. 
+
 ### Wrap parameter
 0 - no wrap, the game map has 4 edges. Mercator style map, where the north and south edges are polar terrain, and equator follows the middle of the map.
 
