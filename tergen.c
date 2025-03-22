@@ -490,19 +490,21 @@ void recover_xy(tiletype tile[mapx][mapy], tiletype *t, int *x, int *y) {
 
 /* Make a tectonic plate, not too close to other plates. */
 int mkplate(int const plates, int const ix, platetype plate[plates], int platedist) {
-	//Up to 5 tries, or give up. Fewer plates is not a problem
-	int tries = 15+1;
-	int sq_p_dist = platedist * platedist * 2 * 64 / 81 / 3;
+	//Pick a random position, then retry if too close to some other plate.
+	//Try many times. Giving up then is ok, we'll get fewer plates.
+	int tries = 25;
+	//Correct with ⅔, or we get very few plates
+	int sq_p_dist = platedist * platedist * 2 / 3;
 	float movedist = (platedist/2.0 + 1)/rounds;
 	while (--tries) {
 		float x = frand(0, mapx); 
 		float y = frand(0, mapy); 
 		//Distance test
-		for (int i = 0; i < ix; ++i) if (sqdist(x,y,plate[i].cx,plate[i].cy) < sq_p_dist) goto tryagain;//64
+		for (int i = 0; i < ix; ++i) if (sqdist(x,y,plate[i].cx,plate[i].cy) < sq_p_dist) goto tryagain;
 		plate[ix].cx = plate[ix].ocx = x;
 		plate[ix].cy = plate[ix].ocy = y;
 		plate[ix].ix = ix + 1;
-		plate[ix].vx = frand(-movedist,movedist);// 5.0/rounds
+		plate[ix].vx = frand(-movedist,movedist);
 		plate[ix].vy = frand(-movedist,movedist);
 		plate[ix].rx = plate[ix].ry = 0;
 		break;
@@ -1908,9 +1910,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//Area divided by plates, is area per plate. The root gives a diameter
 	int plate_dist = sqrtf(mapx*mapy/plates); //9, for the smallest map. 20, for 80x80
-	//(platedist-2)^2 min.sep?
-	//(platedist+1)/2 
-printf("plates: %i   platedist: %i\n",plates,plate_dist);
 	if (plates > 254) plates = 254;
 
 	printf("Plate tectonics, trying %i plates\n", plates);
