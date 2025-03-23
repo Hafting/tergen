@@ -1910,14 +1910,15 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//Area divided by plates, is area per plate. The root gives a diameter
 	int plate_dist = sqrtf(mapx*mapy/plates); //9, for the smallest map. 20, for 80x80
-	if (plates > 254) plates = 254;
+	if (plates > 255) plates = 255;
 
 	printf("Plate tectonics, trying %i plates\n", plates);
 	platetype plate[plates];
 	int done = 0;
 	while (!done) {
 		int i = 0;
-  	for (i = 0; i < plates; ++i) {
+		for (i = 0; i < plates; ++i) {
+			//i from 0 to 254, plate numbers 1 to 255.
 			if (!mkplate(plates, i, plate, plate_dist)) break;
 		} 
 		if (i >= 3) {
@@ -1992,22 +1993,32 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			platetype *pl = &plate[p];
 			pl->cx += pl->vx;
 			pl->cy += pl->vy;	
-			//Is the plate now closer to some neighbour, than the old center?
+			//Is the plate now closer to some neighbour tile, than the old center?
 			float dx = pl->ocx - pl->cx;
 			float dy = pl->ocy - pl->cy;
 			float sqdisto = dx*dx+dy*dy;
+			//Find the closest, if any
+			float sqdist_best = sqdisto;
+			int nearest_n = -1;
+
 			for (int n = neighbours[topo]; n--;) {
 				neighpostype *neigh = np+n;
 				dx = pl->ocx + neigh->dx - pl->cx;
 				dy = pl->ocy + neigh->dy - pl->cy;
 				float sqdistn = dx*dx+dy*dy;
-				if (sqdistn < sqdisto) {
-					//Move the plate in direction of that neighbour
-					moveplate(pl, n, tile);
-					pl->ocx += neigh->dx;
-					pl->ocy += neigh->dy;
+				if ((sqdistn < sqdisto) && (sqdistn < sqdist_best)) {
+					//Find the best plate move, if any.
+					sqdist_best = sqdistn;
+					nearest_n = n;
 				} 
 			}
+			if (nearest_n > -1) {
+				//Move the plate in direction of the closest neighbour tile
+				moveplate(pl, nearest_n, tile);
+				pl->ocx += np[nearest_n].dx;
+				pl->ocy += np[nearest_n].dy;
+			}
+
 		}
 		/* Run weather & erosion */
 		if (asteroids && !(random() % (mapx/16)) ) {
