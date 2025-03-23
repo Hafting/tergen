@@ -277,7 +277,8 @@ typedef struct {
 	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
 	int waterflow; //amount in rivers. Wetness running of, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
 	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
-	short rocks; //erosion, rocks following the rivers
+	short rocks; //erosion, rocks that will follow the rivers
+	int rockflow;
 } tiletype;
 
 
@@ -1719,6 +1720,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		t->waterflow = 3*t->wetness / (7 - t->steepness/4);
 		t->wetness -= t->waterflow;
 		t->mark = 0;
+		t->rockflow = 0;
 	}
 
 	//Iterate through land tiles again. This time, run rivers to the sea.
@@ -1730,7 +1732,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		recover_xy(tile, t, &x, &y);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
-		int flow2 = 0;
 		short rocks = 0;
 		do {
 			//Accumulate waterflow & rocks
@@ -1740,6 +1741,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				flow = t->waterflow;
 			}
 			rocks += t->rocks;
+			t->rockflow += rocks;
 			t->rocks = 0;
 			t->mark = 1; //Been here...
 
@@ -2149,13 +2151,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 #ifdef DBG
 		printf("erode terrain\n");
 #endif
-		//Use water flow to erode the terrain
+		//Use water flow and rock flow to erode the terrain
 		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			tiletype *t = &tile[x][y];
 			//More water moves more rocks. And more with more steepness
 			if (t->terrain == 'm') {
 				t->rocks = sqrtf(sqrtf(t->waterflow * t->steepness));
-//printf("rocks: %5i\n",t->rocks);
+printf("rocks: %5i   flow:%5i   steepness:%5i   rockflow:%5i\n",t->rocks,t->waterflow,t->steepness, t->rockflow);
 				t->height -= t->rocks;
 			}
 		}
