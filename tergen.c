@@ -275,7 +275,7 @@ typedef struct {
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
 	char temperature; //in celsius
 	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
-	int waterflow; //amount in rivers. Wetness running of, plus incoming flow from higher tiles
+	int waterflow; //amount in rivers. Wetness running of, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
 	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
 	short rocks; //erosion, rocks following the rivers
 } tiletype;
@@ -1716,27 +1716,8 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		/*Less runoff from flat land, more from steeper, most from mountains. But not all.
 			Steepness from -1 to 14. 3/(7-steepness/4) yields 4/7, 3/7, 3/6, 3/5, 3/4
 		 */
-		int waterflow = 3*t->wetness / (7 - t->steepness/4);
-		t->wetness -= waterflow;
-		//More emphasis to rivers composed from several tiles, than a single large mountain
-		//looks better, and we get rivers in cold regions too
-		//printf("flow  %5i   -> ",waterflow);
-		if (waterflow) waterflow = sqrtf(sqrtf(waterflow)); //less agressive than log2
-																												//printf("%5i\n", waterflow);
-		/*
-Problem:  That fourth root is fine for deciding where we get a river, and where we don't.
-But it makes "water economy" impossible.
-And every change here, must be followed up with changes to erosion!
-
-Solution: maintain two waterflows:
-- the real waterflow, based on wetness and summed along the way
-Used for calculating erosion and possibly for filling lakes
-- a reduced flow, based on ad-hoc corrections, summed along the way
-Used for assigning river tiles and nothing else.
-
-Postponed to later, as there is a real bug to solve first.
-		 */
-		t->waterflow = waterflow;
+		t->waterflow = 3*t->wetness / (7 - t->steepness/4);
+		t->wetness -= t->waterflow;
 		t->mark = 0;
 	}
 
@@ -1749,11 +1730,15 @@ Postponed to later, as there is a real bug to solve first.
 		recover_xy(tile, t, &x, &y);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
+		int flow2 = 0;
 		short rocks = 0;
 		do {
 			//Accumulate waterflow & rocks
 			t->waterflow += flow;
-			if (!t->mark) flow = t->waterflow; //Accumulate only the first time
+			if (!t->mark) {
+				//Accumulate only the first time water flows through the tile
+				flow = t->waterflow;
+			}
 			rocks += t->rocks;
 			t->rocks = 0;
 			t->mark = 1; //Been here...
