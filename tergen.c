@@ -1715,6 +1715,61 @@ Iterate through land tiles again, highest to lowest.
   } while !sea
 */
 
+/*
+Various problems with erosion. 
+1. Terrain changes during the round, a cached next rivertile could be wrong.
+2. Water may get to the sea, but terrain is changed so the rivers are left discontinous.
+   Next round may fix that, but there may not be a next round.
+
+solution: 
+ * Each round leaves a consistent river system, suitable for outputting a terrain file
+ * The round leaves data like "this much waterflow, this much erosion, this many rocks
+   to deposit.  But no actual terrain change during river running.
+	 So at the end of a round, a consistent terrain is there.
+ * Accumulated changes (mountain eroded to lower height, gravel deposited...) are done
+   immediately before running rivers. A possibly broken terrain is created, and fixed during
+	 river running.
+
+Order of operations:
+1. plate tectonics, may raise mountain ranges and create rifts. Also, rare asteroid strikes, plate edge vulcanism
+2. Apply deferred height map changes. Erosion makes tiles lower, deposits make the tiles higher,
+   may plug lakes, may turn shallow sea to land. Some of the scattered rocks merge into terrain as sediments.
+	 Erosion planned in last round's step 7, lowers terrain and becomes loose rocks.
+	 
+	 All lakes replaced with maximally wet land (may or may not
+	 become a lake during the next river run.)
+
+3. Recompute the sea level
+4. Weather simulation, with evaporation, cloud transport and rain.
+5. Run rivers. Find each tile's "next" river tile. Make lakes – big or small when necessary. No height changes.
+   This establishes the waterflow from/through each tile, possibly a sum of many small flows.
+	 Assume some flooding in flat landscapes; a large river will wet a flat tile to some extent.
+	 A river from the mountains may go through a desert, occationally making grassland.
+6. Mass transport.  Rocks from previous rounds of erosion moves, if there is sufficient steepness and waterflow.
+   Again, assume some flooding in flat landscapes. This leaves some rocks, even if the waterflow is capable
+	 of carrying them. A steep landscape may set lots of
+	 rocks moving. If this flow reaches a flatter calmer landscape, excess rocks may stop. Rocks reaching a lake:
+	 drop enough to plug it, let the rest go on.  Rocks reaching a sea tile: drop many, scatter the rest to
+	 neighbouring sea tiles, if any.
+	 Mass transport also establish a rock flow through each tile.
+7. Erosion. Waterflow, rock flow and steepness cause erosion from movement. Low temperature+steepness cause
+   erosion as water freeze and crack mountain surfaces. Glaciers may cause their own kind of erosion.
+
+
+
+Ice ages/glaciers:
+Water in frozen landscapes moves as glaciers instead. Very little wetness runs off in a slow flow, most of it accumulates in
+an ice sheet. (tile->wetness interpreted as ice thickness) All rocks are transported, no limit to capacity, but they move
+only one tile each round.  
+
+Mountains higher than the ice thickness see little erosion. (height difference to next tile exceed ice thickness.) In flat landscapes, the erosion is much stronger.
+
+Ice age:  Different temperature map, freezing much more of the world. Sea level lowered, as water is tied up in ice. Lots of erosion and gravel production.
+As the ice age ends, temperatures normalize. Wetness starts running off as water, the sea reaches normal levels. Hopefully, we get a landscape with fjords and u-shaped valleys...
+
+	 */
+
+
 //Let rain water flow from every tile to the sea.
 //tp is pointers into the tile array, sorted on height. Tallest is last.
 //unmarked tiles have unmoved water. marked tiles has a precomputed path for water flow
