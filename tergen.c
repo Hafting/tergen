@@ -275,9 +275,10 @@ typedef struct {
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
 	char temperature; //in celsius
 	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
-	int waterflow; //amount in rivers. Wetness running of, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
+	int waterflow; //amount in rivers. Wetness running off, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
 	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
-	int rocks; //erosion, rocks that will follow the rivers
+	int rocks; //erosion, rocks that may follow the rivers and become sediment
+	int erosion; //Erosion, deferred to the next round
 	int rockflow;
 } tiletype;
 
@@ -1727,8 +1728,7 @@ solution:
    to deposit.  But no actual terrain change during river running.
 	 So at the end of a round, a consistent terrain is there.
  * Accumulated changes (mountain eroded to lower height, gravel deposited...) are done
-   immediately before running rivers. A possibly broken terrain is created, and fixed during
-	 river running.
+   immediately before running rivers. A possibly broken terrain is created, and fixed during river running.
 
 Order of operations:
 1. plate tectonics, may raise mountain ranges and create rifts. Also, rare asteroid strikes, plate edge vulcanism
@@ -1781,7 +1781,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		recover_xy(tile, t, &x, &y);
 		//Find lowest neighbour & steepness.
 		find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
-		/*Less runoff from flat land, more from steeper, most from mountains. But not all.
+		/*Less runoff from flat land, more from steeper, most from mountains.
 			Steepness from -1 to 14. 3/(7-steepness/4) yields 4/7, 3/7, 3/6, 3/5, 3/4
 		 */
 		t->waterflow = 3*t->wetness / (7 - t->steepness/4);
@@ -1799,7 +1799,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		recover_xy(tile, t, &x, &y);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
-		int rocks = 0;
+//		int rocks = 0;
 		do {
 			//Accumulate waterflow & rocks
 			t->waterflow += flow;
@@ -1807,13 +1807,13 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				//Accumulate only the first time water flows through the tile
 				flow = t->waterflow;
 			}
-			rocks += t->rocks;
-if (t->rockflow < 0) printf("neg\n");
-			t->rockflow += rocks;
-if (t->rockflow < 0) {
-	printf("A rockflow: %i  rocks:%i t->rocks:%i\n",t->rockflow,rocks,t->rocks);
-}
-			t->rocks = 0;
+//			rocks += t->rocks;
+//if (t->rockflow < 0) printf("neg\n");
+//			t->rockflow += rocks;
+//if (t->rockflow < 0) {
+//	printf("A rockflow: %i  rocks:%i t->rocks:%i\n",t->rockflow,rocks,t->rocks);
+//}
+//			t->rocks = 0;
 			t->mark = 1; //Been here...
 
 			//Did we previously hit a dead end here?
@@ -1830,29 +1830,29 @@ if (t->rockflow < 0) {
 			//If the outlet is higher up, make a lake
 			if (next->height > t->height) t->terrain = '+';
 
-			if (t->terrain == '+') { //if this is a lake...
+//			if (t->terrain == '+') { //if this is a lake...
 				//Drop lots of rocks when hitting a lake
 				//Don't fill beyond from_height-1
 				//if we fill past next height+1, destroy the lake
-				short drop = rocks;
-				short maxdrop1 = from_height-1 - t->height;
-				drop = (drop <= maxdrop1) ? drop : maxdrop1;
-				short maxdrop2 = next->height+1 - t->height;
-				drop = (drop < maxdrop2) ? drop : maxdrop2;
-				rocks -= drop;
-				t->height += drop;
+//				short drop = rocks;
+//				short maxdrop1 = from_height-1 - t->height;
+//				drop = (drop <= maxdrop1) ? drop : maxdrop1;
+//				short maxdrop2 = next->height+1 - t->height;
+//				drop = (drop < maxdrop2) ? drop : maxdrop2;
+//				rocks -= drop;
+//				t->height += drop;
 				//Destroy the lake if we filled it up:
-				if (t->height >= next->height+1) t->terrain = 'm';
-			}
+//				if (t->height >= next->height+1) t->terrain = 'm';
+//			}
 
 			if (next->height < from_height) {
 				//The river goes on to the next tile the normal way.
 				//Drop some rocks depending on steepness, but don't fill over from_height-1
-				short drop = rocks / (t->steepness/4 + 2);
-				short maxdrop = from_height-1 - t->height;
-				drop = (drop <= maxdrop) ? drop : maxdrop;
-				rocks -= drop;
-				t->height += drop;
+//				short drop = rocks / (t->steepness/4 + 2);
+//				short maxdrop = from_height-1 - t->height;
+//				drop = (drop <= maxdrop) ? drop : maxdrop;
+//				rocks -= drop;
+//				t->height += drop;
 			} else {
 				//Next tile is higher than this tile's inlet. The river is trapped. :-(
 				//Attempt a dam break: (Better: create a BIG lake)
@@ -1877,10 +1877,28 @@ printf("dambreak needed?  from_height:%i t->height:%i next->height:%i\n",from_he
 		} while (t->terrain != ':');
 		//Deposit rocks wherever we ended.  Ideally, check if the sea tile filled up. But next round will do that anyway.
 		//A last round cleanup, to make sure rivers don't stop short of the sea?
-		t->height += rocks;
+//		t->height += rocks;
 	}
 }
 
+//Move rocks with the waterflow
+//The waterways should be ready, no changes needed
+void mass_transport(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
+  for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
+		tiletype *t = tp[i];
+		int x, y;
+		recover_xy(tile, t, &x, &y);
+		do {
+			//Look up the next tile
+			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+			int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
+			int ny = wrap(y + nb[t->lowestneigh].dy, mapy);
+			tiletype *next = &tile[nx][ny];
+
+			//more to come...
+		}
+	}
+}
 
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Phase 1: initialization
@@ -2039,6 +2057,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//print_platemap(tile); //dbg
 
+	//Initialize other fields in the tile array
+	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+		tiletype *t = &tile[x][y];
+		t->rocks = 0;
+		t->erosion = 0;
+	}
+
 	//Terrain BEFORE plate tectonics (debug):
 	//output(stdout, land, hillmountain, tempered, wateronland, tile, tp, weather);
 	
@@ -2084,6 +2109,21 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			--asteroids;
 			asteroid_strike(tile);
 		}
+
+		//Let moved rocks become sediments.
+		//Apply erosion planned the previous round.
+		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+			tiletype *t = &tile[x][y];
+			//90% of loose rocks becomes sediments:
+			int rocks = t->rocks * 9 / 10;
+			t->height += rocks;
+			t->rocks -= rocks;
+			//Apply deferred erosion:
+			t->height -= t->erosion;
+			t->rocks += t->erosion;
+			t->erosion = 0;
+		}
+
 #ifdef DBG		
 		printf("weather, round %i\n",i);
 		printf("evaporation\n");
@@ -2115,6 +2155,11 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Evaporate
 			ab->water += cloudcap;
 			if (t->terrain == 'm') t->wetness -= cloudcap;
+			//Cancel lakes, they are recreated if still viable
+			if (t->terrain == '+') {
+				t->terrain = 'm';
+				t->wetness = 3000;
+			}
 		}
 #ifdef DBG
 		printf("move clouds\n");
