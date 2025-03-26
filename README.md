@@ -13,8 +13,10 @@ The following features has been observed in generated terrains:
 - Rain shadows, where mountains block clouds drifting in from the sea. Terrain beyond the mountains may be of a drier type.
 - Rivers may wet the tiles they run through, causing a wetter terrain type.
 ![River wetting tiles](img/river-wet.png)
-- Erosion changes landscapes. A river in the mountains, may erode them and create a valley. Near the coast, erosion may create a fjord.
+- Erosion changes landscapes. Near the coast, erosion may create a fjord.
 ![Fjord from erosion](img/river-fjord.png)
+- In the hills and mountians, river erosion may create a valley.
+![Valley from river erosion](img/river-valley.png)
 
 ## Plate tectonics
 Some plates are created, with random center coordinates and direction of movement. A bigger world has more plates, and the plates are bigger too. Each tile is assigned to the closest plate center, so the plates become convex polygons. After this, many rounds of fractional plate movement. Every plate will move a little in its assigned direction, but only a few plates actually moves each turn. Where plates move apart, rifts appear in the height map. Continents are sometimes torn apart. Where plates collide, mountain ranges are raised by adding up heightmap heights. Such ranges tend to follow plate boundaries. Occationally, an asteroid strikes leaving a crater.
