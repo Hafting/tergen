@@ -1655,23 +1655,23 @@ bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *n
 		}
 	}
 	if (maxheight == below - 2) return false; //Found no way out.
-printf("solution? through n height:%i to m height:%i\n",tile[*newx][*newy].height, tile[mmx][mmy].height);
+//printf("solution? through n height:%i to m height:%i\n",tile[*newx][*newy].height, tile[mmx][mmy].height);
 	//Break the dam
 //	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
 	short newheight = (below + tile[mmx][mmy].height) / 2;
 	int rocks = tile[*newx][*newy].height - newheight;
-
+/*
 if (rocks<0) {
 	printf("NEG height:%i newheight:%i   rocks:%i\n",tile[*newx][*newy].height,newheight,rocks);
 	printf("newneighbour:%i below:%i maxheight:%i\n",newneighbour,below,maxheight);
 }
-
+*/
 	tile[*newx][*newy].height = newheight;
 int dbg=tile[*newx][*newy].rocks;
 	tile[*newx][*newy].rocks += rocks;
 
 //rocks neg, why?
-if (tile[*newx][*newy].rocks < 0) printf("B NEG rocks was:%i rocks=%i \n",dbg,rocks);
+//if (tile[*newx][*newy].rocks < 0) printf("B NEG rocks was:%i rocks=%i \n",dbg,rocks);
 
 	//Heightmap was changed by breaking a dam. Re-run find_next_rivertile on the neighbourhood.
 	nb0 = (*newy & 1) ? nodd[topo] : nevn[topo];
@@ -1899,7 +1899,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			} else {
 				//Next tile is higher than this tile's inlet. The river is trapped. :-(
 				//Attempt a dam break: (Better: create a BIG lake)
-printf("dambreak needed?  from_height:%i t->height:%i next->height:%i\n",from_height,t->height,next->height);
+//printf("dambreak needed?  from_height:%i t->height:%i next->height:%i\n",from_height,t->height,next->height);
 				if (river_dambreak(x, y, from_height, tile, &nx, &ny, seaheight)) {
 					//Success, the river found a new way!
 					//Check if the tile is land or lake after the obstacle broke
@@ -1939,7 +1939,7 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 		//Pick up rocks:
 		int rocks = t->rocks;
 		t->rocks = 0;
-if (rocks < 0) printf("A rocks=%i ?\n",rocks); //WHY negative?
+//if (rocks < 0) printf("A rocks=%i ?\n",rocks); //WHY negative?
 		int x, y;
 		recover_xy(tile, t, &x, &y);
 		do {
@@ -1956,7 +1956,7 @@ int dbg=-7;
 				rocks -= scatter;
 				t->rocks += scatter; dbg=scatter;
 			}
-if (rocks < 0) printf("OUCH! rocks=%i scatter=%i  steep=%i\n",rocks,dbg,t->steepness);
+//if (rocks < 0) printf("OUCH! rocks=%i scatter=%i  steep=%i\n",rocks,dbg,t->steepness);
 
 			//Remaining rocks move, add to rockflow:
 			t->rockflow += rocks;
@@ -2222,7 +2222,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					sediment_percent = 20;
 			}
 
-if (t->erosion < 0 || t->rocks < 0) printf("B erosion:%i rocks:%i\n",t->erosion,t->rocks);
+//if (t->erosion < 0 || t->rocks < 0) printf("B erosion:%i rocks:%i\n",t->erosion,t->rocks);
 			//Some loose rocks becomes sediments:
 			int rocks = t->rocks * sediment_percent / 100;
 			t->height += rocks;
@@ -2231,7 +2231,7 @@ if (t->erosion < 0 || t->rocks < 0) printf("B erosion:%i rocks:%i\n",t->erosion,
 			t->height -= t->erosion;
 			t->rocks += t->erosion;
 			t->erosion = 0;
-if (t->rocks < 0) printf("C rocks=%i\n",t->rocks);
+//if (t->rocks < 0) printf("C rocks=%i\n",t->rocks);
 		}
 
 #ifdef DBG		
@@ -2387,20 +2387,11 @@ if (t->rocks < 0) printf("C rocks=%i\n",t->rocks);
 			//waterflow circumference. The circumference is proportional to
 			//the square root of the flow area.
 			if (t->terrain == 'm') {
-				t->erosion = (sqrtf(t->waterflow) * t->steepness * 1) / rounds; //Erosion from waterflow
+				t->erosion = (sqrtf(t->waterflow) * t->steepness * 4.5) / rounds; //Erosion from waterflow  5 better than 4?
 				t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
 
-printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
+//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
 
-/*
-Tuning needed. There is perhaps too much erosion now.
-But also bugs: rockflow -16 ??? neg?
-changed rocks from short to int, still neg.
-changed rocks in run_rivers to int, still neg.
-
-occational waterflow 756836,with rockflow 586504 ???
-Enormous flow, will pick up lots of rocks along the way
-	 */
 			} else t->erosion = 0;
 		}
 
