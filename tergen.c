@@ -648,6 +648,21 @@ void lake_to_sea(int x, int y, tiletype tile[mapx][mapy]) {
 		 - volcanoes sometimes spread to neighbour mountain tiles
 		 - volcanoes affect neighbour terrain
 		 - thin too dense river grids
+
+Using for x.. for y... loops to do fixups, may impose a pattern on the terrain, a pattern
+depending on the scanning direction. This happens when fixups depend on neighbour tiles that
+got "fixed" in the previous step. Thinning of dense river grids have this problem: instead of
+an unsightly dense grid, we get a regular pattern.
+
+Imposed patterns are avoided by randomizing the tile order. A simple way is to access
+the tiles through tp[], instead of tile[][].  At this point, tp is sorted. First on
+height, then parts are sorted on temperature & wetness. Finally, land tiles are re-sorted
+on waterflow. The tile order is then very different from the order in tile[][].
+
+To further randomize, step through tp[] with large jumps, similar to the search order
+in a hash table. It is then nexessary to find a step size relative prime to mapx*mapy,
+which is easy enough.
+
 	 */
 void terrain_fixups(tiletype tile[mapx][mapy]) {
 	//Get rid of single-tile islands, except unbuildable ones.
@@ -668,14 +683,9 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 				} else {
 					int nx = wrap(x+nb[num].dx, mapx);
 					int ny = wrap(y+nb[num].dy, mapy);
-					tile[nx][ny].terrain = t->terrain; //Raise some neighbour
+					tile[nx][ny].terrain = t->terrain; //Raise a random neighbour. Ought to not plug a fjord doing this...
 				}
 			}
-		} else if (t->terrain == 'v') for (n = 0; n < neighcount; ++n) { //Volcanoes
-			int nx = wrap(x+nb[n].dx, mapx);
-			int ny = wrap(y+nb[n].dy, mapy);
-			//A volcano may spread to a neighbour riverless mountain
-			if ((tile[nx][ny].terrain == 'm') && !tile[nx][ny].river && (random() & 7) == 0) tile[nx][ny].terrain = 'v';
 		}
 	}
 
@@ -686,39 +696,17 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 			//Find deep sea next to land, and small lakes
 			int seacnt = seacount(x, y, tile);
 			int landcnt = neighcount - seacnt;
-			if (seacnt == 0) t->terrain = '+'; //Single-tile sea->lake
+			if (seacnt == 0) t->terrain = '+'; //Single-tile sea->lake. Ought to run a river to near sea, if possible.
 			else if (landcnt >= 2) {
 				t->terrain = ' '; //Make it shallow
 				//Convert to lake, if a small piece of sea is trapped:
 				start_dfs_lake(x, y, tile);
 			} else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Trireme benefit
-		} else if (t->terrain == '+') {
+		} /* else if (t->terrain == '+') {
 			//Find lakes connecting to the sea, change to shallow sea
-			//Occurs because of land sinking or eroding
+			//Occurs because of land sinking or eroding. should not happen anymore?
 			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
-		} else if (t->terrain == 'v') {
-			//Volcanoes fertilize terrain around them, so convert to food terrain
-			//Also melt ice
-			for (n = 0; n < neighcount; ++n) {
-				int nx = wrap(x+nb[n].dx, mapx);
-				int ny = wrap(y+nb[n].dy, mapy);
-				tiletype * const tnb = &tile[nx][ny];
-				switch(tnb->terrain) {
-					case 'A':
-						tnb->terrain = 'T';
-						break;
-					case 'a': 
-						tnb->terrain = 't';
-						break;
-					case 'p':
-						tnb->terrain = 'g';
-						break;
-					case 's':
-						tnb->terrain = 'g';
-						break;
-				}
-			}
-		} else if (t->river) {
+		} */ else if (t->river) {
 			//Remove rivers from the ice, unless they are on the ice edge
 			//Also remove rivers completely surrounded by other rivers,
 			//or almost surrounded. This does not disrupt the river system,
@@ -1049,10 +1037,38 @@ void set_tile(tiletype *t, char lowtype, char hilltype) {
 	}
 }
 
-/*
-Previous default was that one in 25 mountains became volcanoes, and that was the highest mountains. This gave an ok amount of volcanoes, but we have plate tectonics and can do better than that.
+/* Places a volcano at x,y.
+	 Some small chance that it 'spreads' to neighbour riverless mountain tiles.
+	 Volcanoes also melt ice and fertilize terrain around them. */
+void place_and_spread_volcano(tiletype tile[mapx][mapy], int x, int y) {
+	tile[x][y].terrain = 'v';
+	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+	for (int n = 0; n < neighbours[topo]; ++n) {
+		int nx = wrap(x+nb[n].dx, mapx);
+		int ny = wrap(y+nb[n].dy, mapy);
+		tiletype *tnb = &tile[nx][ny];
+		switch (tnb->terrain) {
+			case 'm': //might spread the volcano out
+				if (!tnb->river && !(random() & 7) ) place_and_spread_volcano(tile, nx, ny);
+				break;
+			case 'A': //melt to tundra hill
+				tnb->terrain = 'T';
+				break;
+			case 'a': //melt to tundra
+				tnb->terrain = 't';
+				break;
+			case 'p': //improve to grassland
+				tnb->terrain = 'g';
+				break;
+			case 's': //improve to ggrass. Or possibly forest/jungle, the tile was wet...
+				tnb->terrain = 'g';
+		}
+	}
+}
 
-Parameters: number, initially number of mountain tiles. We want ca. mountains/25 volcanoes, so it gets divided.
+/*
+
+Parameters: number, initially number of mountain tiles. We want ca. mountains/25 volcanoes.
 
 To avoid interrupted rivers, don't make a volcano where there is river.
 
@@ -1061,6 +1077,7 @@ Pass 1: count eligible tiles. They are mountains (or hills), without river, and 
         Using the number of eligible tiles and number of volcanoes, make a probability for such a tile to erupt
 
 Pass 2: for each eligible tile, consult the random generator and possibly place a volcano.
+        When placing a volcano, consider spreading it to adjacent mountain tiles.
 	 */
 void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
 	int eligible = 0;
@@ -1091,8 +1108,7 @@ void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
 		if (t->mark) {
-			int r = random();
-			if ( (r % chance) < 16) t->terrain = 'v';
+			if ( (random() % chance) < 16) place_and_spread_volcano(tile, x, y); t->terrain = 'v';
 		}
 	}
 }
