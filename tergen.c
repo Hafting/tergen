@@ -671,10 +671,14 @@ shallow sea tiles
 land sorted on waterflow
 	 */
 void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seatiles, int deepsea, int landtiles) {
-	//Get rid of single-tile islands, except unbuildable ones. (Avoid cities with no land around them)
 	int const neighcount = neighbours[topo];
 	int n;
 
+	//Reset mark on sea tiles, start_dfs_lake() depends on that
+	tiletype **tt = &tp[seatiles];
+	while (--tt != tp) (*tt)->mark = 0;
+
+	//Get rid of single-tile islands, except unbuildable ones. (Avoid cities with no land around them)
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *const t = &tile[x][y];
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
@@ -729,7 +733,7 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
   }
 
 	//River corrections
-	
+
 
 
 }
