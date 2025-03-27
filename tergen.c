@@ -376,7 +376,7 @@ neighpostype np3[6] = {{ 30},{ 90},{150},{210},{270},{330}};
 neighpostype *nposition[4] = {np0, np1, np2, np3};
 
 /*  This many tile neighbours in each topology */
-int neighbours[4] = {8,4,6,6};
+int neighbours[4] = {8,8,6,6}; //8,4,6,6 ?
 
 /* Heightmap changes due to asteroid strike */
 short chicxulub[4][13][7] = {
@@ -493,7 +493,7 @@ void recover_xy(tiletype tile[mapx][mapy], tiletype *t, int *x, int *y) {
 /* Make a tectonic plate, not too close to other plates. */
 int mkplate(int const plates, int const ix, platetype plate[plates], int platedist) {
 	//Pick a random position, then retry if too close to some other plate.
-	//Try many times. Giving up then is ok, we'll get fewer plates.
+	//Try many times. Giving up then is ok, we'll go with fewer plates.
 	int tries = 25;
 	//Correct with ⅔, or we get very few plates
 	int sq_p_dist = platedist * platedist * 2 / 3;
@@ -566,17 +566,22 @@ int q_compare_temperature(void const *p1, void const *p2) {
 
 //Test for sea, deep or shallow 
 bool is_sea(char c) {
-	return c == ' ' || c == ':';
+	return c == ' ' | c == ':';
 }
 
 //Test for arctic terrain. 
 bool is_arctic(char c) {
-	return c == 'a' || c == 'A';
+	return c == 'a' | c == 'A';
 }
 
 //Test for mountain
 bool is_mountain(char c) {
-	return c == 'm' || c == 'v';
+	return c == 'm' | c == 'v';
+}
+
+//Test if a tile is wet. Sea, lake, or land with river on it
+bool is_wet(tiletype *t) {
+	return (t->terrain == ' ') | (t->terrain == ':') | (t->terrain == '+') | (t->river != 0);
 }
 
 //counts sea neighbours around [x][y].  The central tile is not counted
@@ -676,11 +681,15 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 
 	//Reset mark on sea tiles, start_dfs_lake() depends on that
 	tiletype **tt = &tp[seatiles];
-	while (--tt != tp) (*tt)->mark = 0;
+	while (tt-- != tp) (*tt)->mark = 0;
 
 	//Get rid of single-tile islands, except unbuildable ones. (Avoid cities with no land around them)
-	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-		tiletype *const t = &tile[x][y];
+	tt = &tp[mapx*mapy];
+	tiletype **last = &tp[seatiles];
+	while (tt-- != last) {
+		int x, y;
+		recover_xy(tile, *tt, &x, &y);
+		tiletype *const t = *tt;
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		if (!is_sea(t->terrain) && !is_arctic(t->terrain) && !is_mountain(t->terrain)) {
 			for (n = 0; n < neighcount; ++n) if (!is_sea(tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)].terrain)) break;
@@ -699,10 +708,19 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 		}
 	}
 
-  for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-	  tiletype * const t = &tile[x][y];
-		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-		if (is_sea(t->terrain)) {
+	//if a lake touches sea:
+	//lake_to_sea(x, y, tile)
+	//improved erosion code means this don't happen, so no need for lake_to_sea() now.
+
+	//Fix some (but not all!) cases of deep sea next to land
+	//Turn small pieces of sea into lakes instead.
+
+	tt = &tp[seatiles];
+	while (tt-- != tp) {
+		int x, y;
+		recover_xy(tile, *tt, &x, &y);
+		tiletype * const t = *tt;
+		if (is_sea(t->terrain)) { //test, as a handful may have changed...
 			//Find deep sea next to land, and small lakes
 			int seacnt = seacount(x, y, tile);
 			int landcnt = neighcount - seacnt;
@@ -712,30 +730,62 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 				//Convert to lake, if a small piece of sea is trapped:
 				start_dfs_lake(x, y, tile);
 			} else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Trireme benefit
-		} /* else if (t->terrain == '+') {
-			//Find lakes connecting to the sea, change to shallow sea
-			//Occurs because of land sinking or eroding. should not happen anymore?
-			if (seacount(x, y, tile)) lake_to_sea(x, y, tile);
-		} */ else if (t->river) {
-			//Remove rivers from the ice, unless they are on the ice edge
-			//Also remove rivers completely surrounded by other rivers,
-			//or almost surrounded. This does not disrupt the river system,
-			//but avoids ugly river grids.
-			int icecnt = 0;
-			int rivercnt = 0;
-			for (int n = 0; n < neighbours[topo]; ++n) {
-				tiletype *nbtile = &tile[wrap(x+nb[n].dx,mapx)][wrap(y+nb[n].dy,mapy)];
-				if (is_arctic(nbtile->terrain)) ++icecnt;
-				rivercnt += nbtile->river;
-			}
-			if (icecnt == neighbours[topo] || rivercnt >= neighbours[topo]-1) t->river = 0;
 		}
-  }
+	}
 
-	//River corrections
+	/*
+	River corrections. In wet swampy terrain, every tile may have a river.
+	This looks like an ugly grid. The fix is to thin the grids.
+	Neighboring beach tiles having river looks strange, as the game render
+	a river along the beach. Fix: break it up, so we get small short rivers
+	going straight to sea.
+  It is important not to break up long rivers.
 
+	Old correction: a rivertile surrounded by river tiles, or with only one non-river
+	neighbour was removed.
 
+	Better: remove if the tile is not an endpoint, and the river don't need this tile
+	The rivertile is needed, if it has river on two sides and dry land on two sides.
+	A rivertile where all river neighbours are connected, is usually not needed. Unless
+	it is the sole connection to the sea/lake.
 
+	Simpler: if it has two unconnected sets of dry land neighbours, then the river tile
+	is needed. It is then the connection between 2 river tiles, or river/lake, or lake/sea.
+
+	A river endpoint is also needed, even though it don't connect disjoint water.
+	Endpoints have less than 2 river neighbours.
+
+	So keep those with <2 river neighbours, or >=2 disjoint dry neighbour sets.
+
+	ice correction: no river on arctic, unless there is a non-arctic neighbour with river/sea
+	In this case, a 'm' with low temperature IS arctic.
+
+	nonhex topologies: don't consider corner neighbours, no diagonal rivers! (even neighbours)
+	hex topologies: all neighbours
+
+	*/
+	tt = &tp[mapx*mapy];
+	last = &tp[seatiles];
+	int n_inc = (topo < 2) ? 2 : 1; //Rivers don't have diagonal neighbours
+	while (--tt != last) {
+		tiletype *t = *tt;
+		if (!t->river) continue;
+		int x, y;
+		recover_xy(tile, t, &x, &y);
+		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		int last_nb = neighbours[topo] - n_inc;
+		bool prev_dry = !is_wet(&tile[wrap(x+nb[last_nb].dx,mapx)][wrap(y+nb[last_nb].dy,mapy)]);
+		int river_neigh = 0; //simple count of neighbour tiles with river on them
+		int dry_neigh = 0;   //count of disjoint neighbours with dry land
+		for (int n = 0; n < neighbours[topo]; n += n_inc) {
+			tiletype *tnb = &tile[wrap(x+nb[n].dx,mapx)][wrap(y+nb[n].dy,mapy)];
+			river_neigh += tnb->river;
+			bool dry = !is_wet(tnb);
+			dry_neigh += (dry && !prev_dry);
+			prev_dry = dry;
+		}
+		if (river_neigh >= 2 && dry_neigh < 2) t->river = 0;
+	}
 }
 
 
@@ -1625,8 +1675,9 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
 	short lowheight = 32767; //Higher than highest, some neighbour will be chosen
 	tiletype *t = &tile[x][y];
 	tiletype *neigh;
+	int n_inc = (topo < 2) ? 2 : 1; //No rivers through corners
 	short flowlowheight = lowheight;
-	for (int n = 0; n < neighbours[topo]; ++n) {
+	for (int n = 0; n < neighbours[topo]; n += n_inc) {
 		neigh = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
 		if (neigh->height < lowheight) {
 			lowheight = neigh->height;
@@ -1668,11 +1719,12 @@ bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *n
 	int mmx, mmy;
 	neighbourtype *nb0 = (y & 1) ? nodd[topo] : nevn[topo];
 	char newneighbour;
-	for (char n = 0; n < neighbours[topo]; ++n) {
+	char n_inc = (topo < 2) ? 2 : 1;
+	for (char n = 0; n < neighbours[topo]; n += n_inc) {
 		int nx = wrap(x + nb0[n].dx, mapx);
 		int ny = wrap(y + nb0[n].dy, mapy);
 		neighbourtype *nb1 = (ny & 1) ? nodd[topo] : nevn[topo];
-		for (char m = 0; m < neighbours[topo]; ++m) {
+		for (char m = 0; m < neighbours[topo]; m += n_inc) {
 			int mx = wrap(nx + nb1[m].dx, mapx);
 			int my = wrap(ny + nb1[m].dy, mapy);
 			if (mx == x && my == y) continue;
@@ -1702,7 +1754,7 @@ bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *n
 
 	//Heightmap was changed by breaking a dam. Re-run find_next_rivertile on the neighbourhood.
 	nb0 = (*newy & 1) ? nodd[topo] : nevn[topo];
-	for (char n = 0; n < neighbours[topo]; ++n) {
+	for (char n = 0; n < neighbours[topo]; n += n_inc) {
 		int nx = wrap(*newx + nb0[n].dx, mapx);
 		int ny = wrap(*newy + nb0[n].dy, mapy);
 		find_next_rivertile(nx, ny, tile, seaheight);
