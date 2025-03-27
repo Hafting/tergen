@@ -663,9 +663,15 @@ To further randomize, step through tp[] with large jumps, similar to the search 
 in a hash table. It is then nexessary to find a step size relative prime to mapx*mapy,
 which is easy enough.
 
+Using the sorted tp has other advantages too. Deep sea correction should not iterate through land tiles.
+Land corrections should not iterate through sea. Better performance...
+tp[] order at this point:
+deep sea tiles
+shallow sea tiles
+land sorted on waterflow
 	 */
-void terrain_fixups(tiletype tile[mapx][mapy]) {
-	//Get rid of single-tile islands, except unbuildable ones.
+void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seatiles, int deepsea, int landtiles) {
+	//Get rid of single-tile islands, except unbuildable ones. (Avoid cities with no land around them)
 	int const neighcount = neighbours[topo];
 	int n;
 
@@ -721,6 +727,11 @@ void terrain_fixups(tiletype tile[mapx][mapy]) {
 			if (icecnt == neighbours[topo] || rivercnt >= neighbours[topo]-1) t->river = 0;
 		}
   }
+
+	//River corrections
+	
+
+
 }
 
 
@@ -1015,7 +1026,8 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 
 	//Assign the rivers
 	assign_rivers(tp, seatiles, landtiles, wateronland);
-  terrain_fixups(tile);
+
+  terrain_fixups(tile, tp, seatiles, deepsea, landtiles);
 	
 	output_terrain(f, tile, false);
 
@@ -1069,7 +1081,7 @@ void place_and_spread_volcano(tiletype tile[mapx][mapy], int x, int y) {
 /*
 
 Parameters: number, initially number of mountain tiles. We want ca. mountains/25 volcanoes.
-
+            tp: the tile array, seatiles first, then land tiles. We consider only land tiles.
 To avoid interrupted rivers, don't make a volcano where there is river.
 
 Pass 1: count eligible tiles. They are mountains (or hills), without river, and sit on a tectonic plate edge
@@ -1079,24 +1091,30 @@ Pass 1: count eligible tiles. They are mountains (or hills), without river, and 
 Pass 2: for each eligible tile, consult the random generator and possibly place a volcano.
         When placing a volcano, consider spreading it to adjacent mountain tiles.
 	 */
-void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
+void assign_volcanoes(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int number, int seatiles) {
 	int eligible = 0;
 	number /= 25;
 	number = !number ? 1 : number;
 	//Pass 1
-	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-		tiletype *t = &tile[x][y];
-		t->mark = 0;
+	tiletype **tt = &tp[mapx*mapy];
+	tiletype **last = &tp[seatiles];
+	while (tt-- != last) {
+		tiletype *t = *tt;
 		if (!t->river && (t->terrain == 'm' || t->terrain == 'h' || t->terrain == 'A' || t->terrain == 'T'
 		               || t->terrain == 'F' || t->terrain == 'J' || t->terrain == 'D')) {
 			//Tile is high, and no river. Check if it is on a plate edge
+			int x, y;
+			recover_xy(tile, t, &x, &y);
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 			for (int n = 0; n < neighbours[topo]; ++n) {
 				int nx = wrap(x+nb[n].dx, mapx);
 				int ny = wrap(y+nb[n].dy, mapy);
 				if (tile[nx][ny].plate != t->plate) {
-					t->mark = 1; //Tile MAY go volcanic
+					//Tile MAY go volcanic
 					++eligible;
+					//swap eligible tiles last in the tp array, so we won't need to search for them in pass 2
+					*tt = tp[mapx*mapy-eligible];
+					tp[mapx*mapy-eligible] = t;
 					break;
 				}
 			}
@@ -1105,11 +1123,12 @@ void assign_volcanoes(tiletype tile[mapx][mapy], int number) {
 	if (!eligible) return;
 	int chance = (eligible > number) ? 16*eligible / number : 16; // *16, fixed point arithmetic
 	//Pass 2
-	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-		tiletype *t = &tile[x][y];
-		if (t->mark) {
-			if ( (random() % chance) < 16) place_and_spread_volcano(tile, x, y); t->terrain = 'v';
-		}
+	tt = &tp[mapx*mapy];
+	last = &tp[mapx*mapy - eligible];
+	while (tt-- != last) {
+		int x, y;
+		recover_xy(tile ,*tt, &x, &y);
+		if ( (random() % chance) < 16) place_and_spread_volcano(tile, x, y);
 	}
 }
 
@@ -1222,9 +1241,9 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	//Terrain done, set up the rivers
 	assign_rivers(tp, seatiles, landtiles, wateronland);
 
-	assign_volcanoes(tile, mountains);
+	assign_volcanoes(tile, tp, mountains, seatiles);
 
-	terrain_fixups(tile);
+	terrain_fixups(tile, tp, seatiles, deepseatiles, landtiles);
 
 	output_terrain(f, tile, true);
 }
