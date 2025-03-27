@@ -1639,8 +1639,6 @@ bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *n
 			if (mx == x && my == y) continue;
 			//Find the lowest neighbour of near neigbour.
 			//But not (x,y) !
-//tergen test6 13 2 100 200 37 29
-//bugg...
 			//There may be more than one near neighbour, prefer
 			//flattening the lowest one.
 			if (tile[mx][my].height < maxheight || 
@@ -1655,23 +1653,13 @@ bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *n
 		}
 	}
 	if (maxheight == below - 2) return false; //Found no way out.
-//printf("solution? through n height:%i to m height:%i\n",tile[*newx][*newy].height, tile[mmx][mmy].height);
 	//Break the dam
 //	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
 	short newheight = (below + tile[mmx][mmy].height) / 2;
 	int rocks = tile[*newx][*newy].height - newheight;
-/*
-if (rocks<0) {
-	printf("NEG height:%i newheight:%i   rocks:%i\n",tile[*newx][*newy].height,newheight,rocks);
-	printf("newneighbour:%i below:%i maxheight:%i\n",newneighbour,below,maxheight);
-}
-*/
-	tile[*newx][*newy].height = newheight;
-int dbg=tile[*newx][*newy].rocks;
-	tile[*newx][*newy].rocks += rocks;
 
-//rocks neg, why?
-//if (tile[*newx][*newy].rocks < 0) printf("B NEG rocks was:%i rocks=%i \n",dbg,rocks);
+	tile[*newx][*newy].height = newheight;
+	tile[*newx][*newy].rocks += rocks;
 
 	//Heightmap was changed by breaking a dam. Re-run find_next_rivertile on the neighbourhood.
 	nb0 = (*newy & 1) ? nodd[topo] : nevn[topo];
@@ -1785,9 +1773,8 @@ Order of operations:
 6. Mass transport.  Rocks from previous rounds of erosion moves, if there is sufficient steepness and waterflow.
    Again, assume some flooding in flat landscapes. This leaves some rocks, even if the waterflow is capable
 	 of carrying them. A steep landscape may set lots of
-	 rocks moving. If this flow reaches a flatter calmer landscape, excess rocks may stop. Rocks reaching a lake:
-	 drop enough to plug it, let the rest go on.  Rocks reaching a sea tile: drop many, scatter the rest to
-	 neighbouring sea tiles, if any.
+	 rocks moving. If this flow reaches a flatter calmer landscape, excess rocks may stop. Rocks reaching a lake mostly stop
+	 Rocks reaching a sea tile: drop many, scatter the rest to neighbouring sea tiles, if any.
 	 Mass transport also establish a rock flow through each tile.
 7. Erosion. Waterflow, rock flow and steepness cause erosion from movement. Low temperature+steepness cause
    erosion as water freeze and crack mountain surfaces. Glaciers may cause their own kind of erosion.
@@ -1836,7 +1823,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		recover_xy(tile, t, &x, &y);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
-//		int rocks = 0;
 		do {
 
 			//Flooding in flat landscapes. Give some water back to the tile:
@@ -1850,13 +1836,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				//Accumulate only the first time water flows through the tile
 				flow = t->waterflow;
 			}
-//			rocks += t->rocks;
-//if (t->rockflow < 0) printf("neg\n");
-//			t->rockflow += rocks;
-//if (t->rockflow < 0) {
-//	printf("A rockflow: %i  rocks:%i t->rocks:%i\n",t->rockflow,rocks,t->rocks);
-//}
-//			t->rocks = 0;
 			t->mark = 1; //Been here...
 
 			//Did we previously hit a dead end here?
@@ -1873,33 +1852,10 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			//If the outlet is higher up, make a lake
 			if (next->height > t->height) t->terrain = '+';
 
-//			if (t->terrain == '+') { //if this is a lake...
-				//Drop lots of rocks when hitting a lake
-				//Don't fill beyond from_height-1
-				//if we fill past next height+1, destroy the lake
-//				short drop = rocks;
-//				short maxdrop1 = from_height-1 - t->height;
-//				drop = (drop <= maxdrop1) ? drop : maxdrop1;
-//				short maxdrop2 = next->height+1 - t->height;
-//				drop = (drop < maxdrop2) ? drop : maxdrop2;
-//				rocks -= drop;
-//				t->height += drop;
-				//Destroy the lake if we filled it up:
-//				if (t->height >= next->height+1) t->terrain = 'm';
-//			}
 
-			if (next->height < from_height) {
-				//The river goes on to the next tile the normal way.
-				//Drop some rocks depending on steepness, but don't fill over from_height-1
-//				short drop = rocks / (t->steepness/4 + 2);
-//				short maxdrop = from_height-1 - t->height;
-//				drop = (drop <= maxdrop) ? drop : maxdrop;
-//				rocks -= drop;
-//				t->height += drop;
-			} else {
+			if (next->height >= from_height) {
 				//Next tile is higher than this tile's inlet. The river is trapped. :-(
 				//Attempt a dam break: (Better: create a BIG lake)
-//printf("dambreak needed?  from_height:%i t->height:%i next->height:%i\n",from_height,t->height,next->height);
 				if (river_dambreak(x, y, from_height, tile, &nx, &ny, seaheight)) {
 					//Success, the river found a new way!
 					//Check if the tile is land or lake after the obstacle broke
@@ -1918,9 +1874,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			x = nx; y = ny;
 
 		} while (t->terrain != ':');
-		//Deposit rocks wherever we ended.  Ideally, check if the sea tile filled up. But next round will do that anyway.
-		//A last round cleanup, to make sure rivers don't stop short of the sea?
-//		t->height += rocks;
 	}
 }
 
@@ -1944,7 +1897,6 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 		recover_xy(tile, t, &x, &y);
 		do {
 			//Waterflow with rocks arrived here.
-int dbg=-7;
 			//Drop rocks if the flow holds many:
 			int capacity = rock_capacity(t->waterflow, t->steepness) - t->rockflow;
 			if (rocks > capacity) {
@@ -1954,9 +1906,8 @@ int dbg=-7;
 				//Flooding in flat landscapes, scatter some rocks
 				int scatter = rocks / (t->steepness+2);
 				rocks -= scatter;
-				t->rocks += scatter; dbg=scatter;
+				t->rocks += scatter;
 			}
-//if (rocks < 0) printf("OUCH! rocks=%i scatter=%i  steep=%i\n",rocks,dbg,t->steepness);
 
 			//Remaining rocks move, add to rockflow:
 			t->rockflow += rocks;
@@ -2222,7 +2173,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					sediment_percent = 20;
 			}
 
-//if (t->erosion < 0 || t->rocks < 0) printf("B erosion:%i rocks:%i\n",t->erosion,t->rocks);
 			//Some loose rocks becomes sediments:
 			int rocks = t->rocks * sediment_percent / 100;
 			t->height += rocks;
@@ -2231,7 +2181,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			t->height -= t->erosion;
 			t->rocks += t->erosion;
 			t->erosion = 0;
-//if (t->rocks < 0) printf("C rocks=%i\n",t->rocks);
 		}
 
 #ifdef DBG		
