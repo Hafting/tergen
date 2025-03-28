@@ -1884,6 +1884,44 @@ As the ice age ends, temperatures normalize. Wetness starts running off as water
 
 	 */
 
+/*
+BIG lake system (instead of dambreaks that may fail)
+
+laketype {
+	int tiles; //# of tiles in the lake
+  short height; //Height of water, same as height of outlet
+	int out_x, out_y; //coordinates of outlet tile
+
+}
+
+Each tile get a "lake number". if nonzero, it refers to some lake. water transfers to the outlet tile and flows from there.
+
+A river runs from a mountaintop. At some point, the exit tile is higher:
+1.the problem tile becomes the current lake tile:
+2.set lake height to tile height. Add the tile to the lake
+3.iterate through the tiles neighbours.
+  Skip any that are already in the lake, or in the priority queue
+	a.add tiles higher than the lake to the priority queue / heap
+	b.if any tile LOWER than the lake, use this tile as the lakes outflow
+	  tile, and set the lowest outside tile as the next rivertile.
+		Lake processing finishes at this point, the river keeps flowing.
+	c.No low tile: pick the lowest tile from the heap.
+	  make this tile current and goto (2)
+
+This procedure establishes a lake of any size, by floodfilling 
+the terrain till an exit is found. 
+
+When water enter a tile, check if it is a lake. If so, transfer to
+the exit tile and go on from there.
+
+Similar for rock flow. When entering a lake, drop the rocks and 
+end the rockflow right there.
+
+As water go on, a bigger lake might form. What if it rises to engulf
+other lakes? (Through the outflow tile, or other of same height)
+
+	 */
+
 
 //Let rain water flow from every tile to the sea.
 //tp is pointers into the tile array, sorted on height. Tallest is last.
