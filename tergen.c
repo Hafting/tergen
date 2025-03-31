@@ -1900,7 +1900,7 @@ A river runs from a mountaintop. At some point, the exit tile is higher:
 1.the problem tile becomes the current lake tile:
 2.set lake height to tile height. Add the tile to the lake
 3.iterate through the tiles neighbours.
-  Skip any that are already in the lake, or in the priority queue
+  Skip any that are already in the lake, or in the priority queue (use an efficient check, i.e. O(1)
 	a.add tiles higher than the lake to the priority queue / heap
 	b.if any tile LOWER than the lake, use this tile as the lakes outflow
 	  tile, and set the lowest outside tile as the next rivertile.
@@ -1918,7 +1918,39 @@ Similar for rock flow. When entering a lake, drop the rocks and
 end the rockflow right there.
 
 As water go on, a bigger lake might form. What if it rises to engulf
-other lakes? (Through the outflow tile, or other of same height)
+other lakes? (Through the outflow tile, or other border tiles of the same height)
+
+We cannot simply let the lake terrain fill again from the other side. This could
+lead to an infinite loop, where water repeatedly flow back and forth filling two lakes.
+
+So. When a lake want to spill over an edge and there is a lake on the other side:
+- if the lake on the other side is lower, fine. Let waterflow enter that lake and
+  proceed to its exit which was found in an earlier run_rivers() this round.
+
+- the lake on the other side cannot be higher. If it was higher, that edge
+  tile would be submerged!
+
+- The other lake may have the same height, which could happen is a flat landscape.
+  If the other lake is from an earlier run_rivers() this round, we can use it.
+	Let water flow to its exit as usual.
+
+- If the other lake is the same height and created earlier in this run_rivers(),
+  we have a problem. We cannot use its exit, because that exit has filled the
+	lake we are now processing.
+
+	The lakes must merge, and will likely also have to rise to find a new common
+	outflow. (MAY not need to rise, if another same-height tile can be used for outflow.)
+
+Lake merging:
+A. Track down every tile of the other lake. (They are connected, so a DFS ought to be
+   much faster than searching the entire map.)  Move them to THIS lake. Add all such tiles
+	 neighbours to the priqueue, unless they are there already or are lake. Except for the
+	 lakes's outflow tile, none have a lower neighbour not inside the lake.
+	 End with selecting the other lakes old outflow tile, and process it at point 3 above. This
+	 because a tile have many neighbours. The first outflow led to a dead end and this
+	 lake merger. There may be another way out that works. If not, the priority queue
+	 will find the next place to grow the lake. Eventually, an outflow to the sea will
+	 be found.
 
 	 */
 
