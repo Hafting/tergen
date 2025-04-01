@@ -271,6 +271,7 @@ typedef struct {
 	char plate;   //id of tectonic plate this tile belongs to
 	char mark; //for depth-first search, volcano calculations etc.
 	char river; //for river assignment during map output
+	char lake_ix; //If tile is a lake '+', index into lake table
 	char lowestneigh; //direction of lowest neighbour
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
 	char temperature; //in celsius
@@ -315,6 +316,15 @@ typedef struct {
 	int angle;    //Direction to neighbour tile
 	float dx, dy; //distance vector to neighbour tile (computed from angle)
 } neighpostype;
+
+typedef struct {
+	int outflow_x, outflow_y; //rivertile handling exit from this lake
+	int tiles;              //number of tiles in the lake.
+	int river_serial;       //for checking whether lakes were created in the same river run or not.
+	short height;           //Lake height above terrain reference zero height.
+} laketype;
+
+#define MAX_LAKES 127
 
 //Globals
 int mapx, mapy; //Map dimensions
@@ -1962,6 +1972,13 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 	//Iterate through land tiles, prepare waterflow, find river directions, clear marks
   for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
 		tiletype *t = tp[i];
+		//Cancel existing lakes. They get recreated in the next pass, if still viable.
+		//This way, no need to deal with lake trouble when the terrain changes.
+		if (t->terrain == '+') {
+			t->terrain = 'm';
+			t->wetness = 1000;
+		}
+		t->lake_ix = -1;
 		int x, y;
 		recover_xy(tile, t, &x, &y);
 		//Find lowest neighbour & steepness.
@@ -1976,7 +1993,8 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 	}
 
 	//Iterate through land tiles again. This time, run rivers to the sea.
-	//Re-route rivers in case of obstacles (BIG lakes would be better)
+	//When there is no lower tile, create a lake and grow it until some exit is found.
+	//A world with little sea, may grow BIG lakes until that sea is found!
   for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
 		tiletype *t = tp[i];
 		if (t->mark || !t->waterflow) continue;
@@ -1991,7 +2009,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			flow -= floodwater;
 			t->wetness += floodwater;
 
-			//Accumulate waterflow & rocks
+			//Accumulate waterflow
 			t->waterflow += flow;
 			if (!t->mark) {
 				//Accumulate only the first time water flows through the tile
@@ -2375,11 +2393,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Evaporate
 			ab->water += cloudcap;
 			if (t->terrain == 'm') t->wetness -= cloudcap;
-			//Cancel lakes, they are recreated if still viable
-			if (t->terrain == '+') {
-				t->terrain = 'm';
-				t->wetness = 3000;//careful with ice..
-			}
 		}
 #ifdef DBG
 		printf("move clouds\n");
