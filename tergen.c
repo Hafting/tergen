@@ -1978,14 +1978,22 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 	tiletype *t = &tile[x][y];
 	//Add tiles until an outflow tile with a lower neighbour is found.
 	do {
-		//Add the tile to the lake
+		//The tile t is the lake's lowest neighbour.
+		//Now, it will either become the next lake tile,
+		//or become the lake outlet.
+
+		//Adjust lake height to tile height
 		l->height = (t->height > l->height) ? t->height : l->height;
+		//Add tile to lake, Undo if it becomes an outlet
 		l->tiles++;
 		t->terrain = '+';
 		t->lake_ix = lake_ix;
 
-		//Iterate through tile neighbours
+		//Iterate through tile neighbours,
+		//looking for a lower tile (or lower lake/sea)
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		int best_x = -1, best_y = -1;
+		short best_h;
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
@@ -1995,8 +2003,12 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 			if (t->height < l->height) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
+				//Also check if there is a lake on the other tile:
+				//Water can flow to a lower lake, a same-height lake
+				//must merge!
+				//
 			}
-		}
+		} //
 
 	} while (...);
 }
