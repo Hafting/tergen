@@ -1964,6 +1964,11 @@ A. Track down every tile of the other lake. (They are connected, so a DFS ought 
 
 	 */
 
+int lakes;
+laketype lake[MAX_LAKES];
+
+void mk_lake(int x, int y, tiletype tile[mapx][mapy]) {
+}
 
 //Let rain water flow from every tile to the sea.
 //tp is pointers into the tile array, sorted on height. Tallest is last.
@@ -1974,6 +1979,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		tiletype *t = tp[i];
 		//Cancel existing lakes. They get recreated in the next pass, if still viable.
 		//This way, no need to deal with lake trouble when the terrain changes.
+		//Lakes gets plugged by eroded rocks. Plate tectonics may rip a lake apart.
 		if (t->terrain == '+') {
 			t->terrain = 'm';
 			t->wetness = 1000;
@@ -1992,6 +1998,8 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		t->rockflow = 0;
 	}
 
+	lakes = 0; //Until we find some
+
 	//Iterate through land tiles again. This time, run rivers to the sea.
 	//When there is no lower tile, create a lake and grow it until some exit is found.
 	//A world with little sea, may grow BIG lakes until that sea is found!
@@ -2005,53 +2013,56 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		do {
 
 			//Flooding in flat landscapes. Give some water back to the tile:
-			int floodwater = flow / (t->steepness + 10);
-			flow -= floodwater;
-			t->wetness += floodwater;
+			if (t->terrain != '+') {
+				int floodwater = flow / (t->steepness + 10);
+				flow -= floodwater;
+				t->wetness += floodwater;
+			}
 
-			//Accumulate waterflow
+			//Accumulate waterflow through the tile
 			t->waterflow += flow;
 			if (!t->mark) {
-				//Accumulate only the first time water flows through the tile
+				//Pick up water only the first time water flows through this tile
 				flow = t->waterflow;
 			}
 			t->mark = 1; //Been here...
 
-			//Did we previously hit a dead end here?
+
+			//Determine the next tile. For land tiles, t->lowestneigh
+			//For a lake tile, the lake outflow tile
+
+			//Dead end? (impossible)
 			if (t->lowestneigh == -1) {
-				break; //No progress possible, water stops here!
+				fail("DEBUG: impossible lowestneigh\n");
+				break;
 			}
 
-			//Look up the next tile
-			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-			int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
-			int ny = wrap(y + nb[t->lowestneigh].dy, mapy);
-			tiletype *next = &tile[nx][ny];
+			if (t->terrain == 'm') {
+				//Look up the next tile
+				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+				int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
+				int ny = wrap(y + nb[t->lowestneigh].dy, mapy);
+				tiletype *next = &tile[nx][ny];
 
-			//If the outlet is higher up, make a lake
-			if (next->height > t->height) t->terrain = '+';
-
-
-			if (next->height >= from_height) {
-				//Next tile is higher than this tile's inlet. The river is trapped. :-(
-				//Attempt a dam break: (Better: create a BIG lake)
-				if (river_dambreak(x, y, from_height, tile, &nx, &ny, seaheight)) {
-					//Success, the river found a new way!
-					//Check if the tile is land or lake after the obstacle broke
-					next = &tile[nx][ny];
-					t->terrain = (t->height <= next->height) ? '+' : 'm';
-				} else {
-					//Failure, so the river must STOP here
-					t->lowestneigh = -1;
-					break;
+				//If the tile outlet is higher up, make a lake
+				if (next->height > t->height) mk_lake(x, y, tile);
+				else {
+					//River proceeds downhill
+					from_height = t->height;
+					//Make the next tile current:
+					t = next;
+					x = nx; y = ny;
 				}
-
 			}
-			from_height = (t->height > next->height) ? t->height : next->height;
-			//Make the next tile current:
-			t = next;
-			x = nx; y = ny;
 
+			if (t->terrain == '+') {
+				//The river ran into a lake. Transfer flow to the lake exit:
+				laketype *l = &lake[t->lake_ix];
+				x = l->outflow_x;
+				y = l->outflow_y;
+				t = &tile[x][y];
+				from_height = l->height;
+			}
 		} while (t->terrain != ':');
 	}
 }
