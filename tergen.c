@@ -1967,7 +1967,38 @@ A. Track down every tile of the other lake. (They are connected, so a DFS ought 
 int lakes;
 laketype lake[MAX_LAKES];
 
-void mk_lake(int x, int y, tiletype tile[mapx][mapy]) {
+void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
+	int lake_ix = lakes++;
+	laketype *l = &lake[lakes++];
+
+	l->tiles = 0;
+	l->river_serial = river_serial;
+	l->height = -32768; //So the first tile WILL be higher
+
+	tiletype *t = &tile[x][y];
+	//Add tiles until an outflow tile with a lower neighbour is found.
+	do {
+		//Add the tile to the lake
+		l->height = (t->height > l->height) ? t->height : l->height;
+		l->tiles++;
+		t->terrain = '+';
+		t->lake_ix = lake_ix;
+
+		//Iterate through tile neighbours
+		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		for (int n = neighbours[topo]; n--;) {
+			int nx = wrap(x+nb[n].dx, mapx);
+			int ny = wrap(y+nb[n].dy, mapy);
+			tiletype *tn = &tile[nx][ny];
+			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
+			if (tn->terrain == '+' && tn->lake_ix != lake_ix) printf("DBG: lake reached other lake!\n");
+			if (t->height < l->height) {
+				//Found a possible outlet!
+				//But keep looking, the tile might have an even lower neighbour.
+			}
+		}
+
+	} while (...);
 }
 
 //Let rain water flow from every tile to the sea.
@@ -2045,7 +2076,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				tiletype *next = &tile[nx][ny];
 
 				//If the tile outlet is higher up, make a lake
-				if (next->height > t->height) mk_lake(x, y, tile);
+				if (next->height > t->height) mk_lake(x, y, tile, i);
 				else {
 					//River proceeds downhill
 					from_height = t->height;
