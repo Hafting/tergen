@@ -322,9 +322,12 @@ typedef struct {
 	int tiles;              //number of tiles in the lake.
 	int river_serial;       //for checking whether lakes were created in the same river run or not.
 	short height;           //Lake height above terrain reference zero height.
+	int priq_len;						//# of entries in priority queue
+	tiletype **priq;        //priority queue (array heap), tile pointers
 } laketype;
 
 #define MAX_LAKES 127
+#define MAX_PRIQ 20000
 
 //Globals
 int mapx, mapy; //Map dimensions
@@ -810,22 +813,21 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	int landtiles = land * tilecnt / 100;
 	int seatiles = tilecnt - landtiles;
 	short level = tp[seatiles ? seatiles-1 : 0]->height;
-
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
-	for (int i = 0; i < seatiles-1; ++i) {
-		tp[i]->terrain = ':';
+	for (int i = 0; i < seatiles; ++i) {
+		tp[i]->terrain = ':'; tp[i]->mark=47;
 		tp[i]->wetness = 1000; //In case the tile surfaces later, avoid too much fake wetness
 	}
 	for (int i = seatiles; i < tilecnt; ++i) {
-		if (tp[i]->terrain != '+') tp[i]->terrain = 'm';
+		if (tp[i]->terrain != '+') tp[i]->terrain = 'm'; tp[i]->mark=9;
 	}
 	//temperatures. Land temperatures fall with elevation. About 10C per km up
   for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		if (tile[x][y].terrain == ':') tile[x][y].temperature = weather[x][y].sea_temp;
 		else tile[x][y].temperature = weather[x][y].land_temp - (tile[x][y].height-level)/100;
 	}
-	//two rounds of averaging. Sea may thaw slightly frozen land, very cold land may freeze some sea.
+	//two rounds of weighted averaging. Sea may thaw slightly frozen land, very cold land may freeze some sea.
 	signed char tmptemp[mapx][mapy];
 	int half = (neighbours[topo]+2)/2;
 	memset(tmptemp, 0, mapx*mapy*sizeof(signed char));
@@ -1311,6 +1313,7 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 	output_terrain(f, tile, true);
 }
+
 
 //Ensures recursively that mountains stay below 10000m when plates collide,
 //or an asteroid strikes.
@@ -1800,7 +1803,7 @@ void asteroid_strike(tiletype tile[mapx][mapy]) {
 		tile[nx][ny].height += heightchange;
 		if (tile[nx][ny].height < 0) tile[nx][ny].height = 0;
 		else if (tile[nx][ny].height > 10000) mountaincheck(nx, ny, -1, tile);
-		if (tile[nx][ny].terrain == '+') tile[nx][ny].terrain = 'm'; //Lakes do not survive strikes
+		if (tile[nx][ny].terrain == '+') tile[nx][ny].terrain = 'm'; //Lakes evaporate when hit by an asteroid
 	}
 }
 
@@ -1966,21 +1969,77 @@ A. Track down every tile of the other lake. (They are connected, so a DFS ought 
 
 int lakes;
 laketype lake[MAX_LAKES];
+tiletype *priq[MAX_PRIQ];
+
+//Add to a priority queue/heap
+void addto_priq(laketype *l, tiletype *t) {
+	if (l->priq - priq + l->priq_len == MAX_PRIQ) fail("Ran out of space for priority queues. Recompile with higher MAX_PRIQ\n");
+
+	l->priq[l->priq_len] = t; //Feilet for l->priq_len == 0  ??
+
+	//Push the new entry up the heap, if necessary
+	int x = l->priq_len;
+	while (x) {
+		int above_x = (x-1) / 2;
+		if (l->priq[x]->height < l->priq[above_x]->height) {
+			tiletype *tmp = l->priq[above_x];
+			l->priq[above_x] = l->priq[x];
+			l->priq[x] = tmp;
+			x = above_x;
+		} else x = 0;
+	}
+
+	l->priq_len++;
+}
+
+//Extract minimum from priority queue/heap
+tiletype *minfrom_priq(laketype *l) {
+	if (!l->priq_len) fail("Program bug, cannot extract from an empty priority queue.\n");
+	tiletype *ret = l->priq[0];
+	l->priq[0] = l->priq[--l->priq_len];
+	//Get the heap in order, swap the top element down
+	int i = 0;
+	do {
+		int child = i*2+1;
+		if (child < l->priq_len) {
+			int child2 = child+1;
+			if ((child2 < l->priq_len) && (l->priq[child2]->height < l->priq[child]->height)) child = child2;
+			i = child;
+			if (l->priq[child]->height < l->priq[i]->height) {
+				tiletype *tmp = l->priq[child];
+				l->priq[child] = l->priq[i];
+				l->priq[i] = tmp;
+			} else break;
+		}
+	} while (i < l->priq_len);
+	return ret;
+}
+
+void merge_lakes() {
+	printf("no can do - not implemented yet\n");
+}
 
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
-	int lake_ix = lakes++;
+#ifdef DBG
+	printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
+#endif
+	int lake_ix = lakes;
 	laketype *l = &lake[lakes++];
 
 	l->tiles = 0;
 	l->river_serial = river_serial;
 	l->height = -32768; //So the first tile WILL be higher
-
+	l->priq_len = 0;
+	laketype *prev = &lake[lake_ix-1];
+	l->priq = lake_ix ? prev->priq + prev->priq_len : priq;
 	tiletype *t = &tile[x][y];
 	//Add tiles until an outflow tile with a lower neighbour is found.
 	do {
 		//The tile t is the lake's lowest neighbour.
 		//Now, it will either become the next lake tile,
 		//or become the lake outlet.
+
+		if (t->height < l->height) fail("impossible, tile lower than lake?\n");
 
 		//Adjust lake height to tile height. A lower tile should not be possible, but...
 		l->height = (t->height > l->height) ? t->height : l->height;
@@ -1997,6 +2056,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int best_x = -1, best_y = -1;
 		short best_h = 20000;
+		int best_n = -1;
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
@@ -2006,7 +2066,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 			short nheight = (tn->terrain == '+') ? lake[tn->lake_ix].height : tn->height;
 			if ( (tn->height > l->height) || (tn->height > best_h)) continue; //Skip useless
 
-			if (tn->terrain == '+' && tn->lake_ix != lake_ix) printf("DBG: lake reached other lake!\n");
+			if ((tn->terrain == '+') && (tn->lake_ix != lake_ix)) printf("DBG: lake reached other lake!\n");
 
 			//The neighbour is <= lake height AND <= best_h
 			//always select < best_h, no further questions
@@ -2018,23 +2078,48 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 
 			//if == best_h, select only if it is a lake with different river serial
 
-			if ( (tn->height < best_h) || (tn->terain == '+' && lake[tn->lake_ix].river_serial != river_serial) ) {
+			if ( (tn->height < best_h) || ( (tn->terrain == '+') && (lake[tn->lake_ix].river_serial != river_serial)) ) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
 				best_h = nheight;
 				best_x = nx;
 				best_y = ny;
+				best_n = n;
 			}
 		} //neighbour scan
 
 		//Did we find an outlet?  If so, set up its use and return.
 		//Did we find a same_height lake with same river_serial?  If so, merge the lakes.
+		if (best_h < 20000) { //Found something
+			tiletype *tn = &tile[best_x][best_y];
+			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();
+			else {
+				//What we found, was a useable outlet. So, use it.
+				l->outflow_x = x;
+				l->outflow_y = y;
+				t->lowestneigh = best_n; //original might be different.
+				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
+				return;
+			}
+		}
 
-		//No outlet yet? Scan neighbours again, add to the priority queue
-		//pick lowest tile t from the priority queue, and keep going.
+		//No outlet yet. Scan neighbours again, add to the priority queue.
+		//Then pick the lowest tile t from the priority queue, and keep going.
+		for (int n = neighbours[topo]; n--;) {
+			int nx = wrap(x+nb[n].dx, mapx);
+			int ny = wrap(y+nb[n].dy, mapy);
+			tiletype *tn = &tile[nx][ny];
+			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
 
+			//Add the tile to the priority queue:
+			tn->lake_ix = lake_ix; //Also mark it
+			addto_priq(l, tn);
+		}
 
-	} while (...);
+		//Find the next lowest lake edge tile
+		t = minfrom_priq(l);
+		recover_xy(tile, t, &x, &y);
+	} while (true);
 }
 
 //Let rain water flow from every tile to the sea.
@@ -2042,7 +2127,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 //unmarked tiles have unmoved water. marked tiles has a precomputed path for water flow
 void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Iterate through land tiles, prepare waterflow, find river directions, clear marks
-  for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
+  for (int i = mapx*mapy - 1; (tp[i]->terrain != ':') && (i >= 0); --i) {
 		tiletype *t = tp[i];
 		//Cancel existing lakes. They get recreated in the next pass, if still viable.
 		//This way, no need to deal with lake trouble when the terrain changes.
@@ -2078,7 +2163,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
 		do {
-
 			//Flooding in flat landscapes. Give some water back to the tile:
 			if (t->terrain != '+') {
 				int floodwater = flow / (t->steepness + 10);
@@ -2152,7 +2236,7 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 //if (rocks < 0) printf("A rocks=%i ?\n",rocks); //WHY negative?
 		int x, y;
 		recover_xy(tile, t, &x, &y);
-		do {
+		while (rocks && t->terrain != ':' && t->terrain != '+') {
 			//Waterflow with rocks arrived here.
 			//Drop rocks if the flow holds many:
 			int capacity = rock_capacity(t->waterflow, t->steepness) - t->rockflow;
@@ -2171,6 +2255,7 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 
 			//No next tile? (run_rivers() gave up here)
 			if (t->lowestneigh == -1) {
+				fail("impossible, no next rivertile? (rock flow)\n");
 				t->rocks += rocks;
 				rocks = 0;
 				break;
@@ -2185,8 +2270,8 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 			//Make next tile current
 			t = next;
 			x = nx; y = ny;
-		} while (t->terrain != ':' && rocks);
-		//Scatter remaining rocks on this and neighbouring sea tiles:
+		}
+		//Scatter remaining rocks on this and neighbouring sea/lake tiles:
 		if (rocks) {
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 			int scatter = rocks/10;
@@ -2194,7 +2279,7 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 				int nx = wrap(x+nb[n].dx, mapx);
 				int ny = wrap(y+nb[n].dy, mapy);
 				tiletype *tn = &tile[nx][ny];
-				if (tn->terrain == ':') {
+				if (tn->terrain == ':' || tn->terrain == '+') {
 					tn->rocks += scatter;
 					rocks -= scatter;
 				}
@@ -2428,6 +2513,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					break;
 				default:
 					sediment_percent = 20;
+					break;
 			}
 
 			//Some loose rocks becomes sediments:
@@ -2708,7 +2794,9 @@ int main(int argc, char **argv) {
 	tiletype **tp = malloc(mapx * mapy * sizeof(tiletype *));
 	{
 		int i = 0, x = mapx, y = mapy;
-		while (x--) for (y=mapy; y--;) tp[i++]=&(tile[x][y]);
+		while (x--) for (y=mapy; y--;) {
+			tp[i++]=&(tile[x][y]);
+		}
 	}
 	mkplanet(land, hillmountain, tempered, wateronland, tile, tp);
 }
