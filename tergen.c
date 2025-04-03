@@ -2022,6 +2022,7 @@ void merge_lakes() {
 }
 
 
+
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
 	printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
@@ -2051,14 +2052,14 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		t->terrain = '+';
 		t->lake_ix = lake_ix;
 printf("tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->height,l->height);
-		//Iterate through tile neighbours,
+		//Iterate through tile neighbours, in search of a drain.
 		//looking for a lower tile (or lower lake/sea)
 		//Find the best/lowest of possibly several outlets. Or none.
 		//Not the same as the next rivertile, because the lowest
 		//neighbour may be inside this lake already.
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int best_x = -1, best_y = -1;
-		short best_h = 20000;
+		short best_h = l->height;
 		int best_n = -1;
 printf("search for drain...\n");
 		for (int n = neighbours[topo]; n--;) {
@@ -2070,7 +2071,7 @@ printf("search for drain...\n");
 			short nheight = (tn->terrain == '+') ? lake[tn->lake_ix].height : tn->height;
 			if ( (tn->height > l->height) || (tn->height > best_h)) continue; //Skip useless
 
-			if ((tn->terrain == '+') && (tn->lake_ix != lake_ix)) printf("DBG: lake reached other lake!\n");
+			if ((tn->terrain == '+') && (tn->lake_ix != lake_ix)) printf("DBG: lake reached other lake!\n"); //not necessarily a problem
 
 			//The neighbour is <= lake height AND <= best_h
 			//always select < best_h, no further questions
@@ -2094,7 +2095,7 @@ printf("search for drain...\n");
 
 		//Did we find an outlet?  If so, set up its use and return.
 		//Did we find a same_height lake with same river_serial?  If so, merge the lakes.
-		if (best_h < 20000) { //Found something
+		if (best_n != -1) { //Found something
 			tiletype *tn = &tile[best_x][best_y];
 			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();
 			else {
@@ -2103,7 +2104,8 @@ printf("search for drain...\n");
 				l->outflow_y = y;
 				t->lowestneigh = best_n; //original might be different.
 				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
-printf("mk_lake() done\n");
+				l->tiles--;
+printf("mk_lake() done. outflow tile %3i,%3i. Lake tiles:%i\n",x,y,l->tiles);
 				return;
 			}
 		}
