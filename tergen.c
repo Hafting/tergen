@@ -1974,8 +1974,8 @@ tiletype *priq[MAX_PRIQ];
 //Add to a priority queue/heap
 void addto_priq(laketype *l, tiletype *t) {
 	if (l->priq - priq + l->priq_len == MAX_PRIQ) fail("Ran out of space for priority queues. Recompile with higher MAX_PRIQ\n");
-
-	l->priq[l->priq_len] = t; //Feilet for l->priq_len == 0  ??
+printf("adding height %i to priq\n", t->height);
+	l->priq[l->priq_len] = t;
 
 	//Push the new entry up the heap, if necessary
 	int x = l->priq_len;
@@ -2004,20 +2004,22 @@ tiletype *minfrom_priq(laketype *l) {
 		if (child < l->priq_len) {
 			int child2 = child+1;
 			if ((child2 < l->priq_len) && (l->priq[child2]->height < l->priq[child]->height)) child = child2;
-			i = child;
 			if (l->priq[child]->height < l->priq[i]->height) {
 				tiletype *tmp = l->priq[child];
 				l->priq[child] = l->priq[i];
 				l->priq[i] = tmp;
 			} else break;
 		}
+		i = child;
 	} while (i < l->priq_len);
+printf("minfrom() returning height %i\n", ret->height);
 	return ret;
 }
 
 void merge_lakes() {
 	printf("no can do - not implemented yet\n");
 }
+
 
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
@@ -2220,6 +2222,7 @@ printf("transfer to outflow %3i,%3i height:%i", x,y,t->height);
 printf("\n");
 			}
 //bug found. Don't proceed into '+' after 'm', except when mklake() ran.
+//fixing this did not help, as mklake() made a waterflow loop anyway :-(
 			else if (t->terrain == '+') {
 				//The river ran into a lake. Transfer flow to the lake exit:
 				laketype *l = &lake[t->lake_ix];
