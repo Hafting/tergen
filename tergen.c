@@ -1982,7 +1982,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		//Now, it will either become the next lake tile,
 		//or become the lake outlet.
 
-		//Adjust lake height to tile height
+		//Adjust lake height to tile height. A lower tile should not be possible, but...
 		l->height = (t->height > l->height) ? t->height : l->height;
 		//Add tile to lake, Undo if it becomes an outlet
 		l->tiles++;
@@ -1991,24 +1991,48 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 
 		//Iterate through tile neighbours,
 		//looking for a lower tile (or lower lake/sea)
+		//Find the best/lowest of possibly several outlets. Or none.
+		//Not the same as the next rivertile, because the lowest
+		//neighbour may be inside this lake already.
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int best_x = -1, best_y = -1;
-		short best_h;
+		short best_h = 20000;
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tn = &tile[nx][ny];
 			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
+			//Heigh of neighbour tile, or any lake on it:
+			short nheight = (tn->terrain == '+') ? lake[tn->lake_ix].height : tn->height;
+			if ( (tn->height > l->height) || (tn->height > best_h)) continue; //Skip useless
+
 			if (tn->terrain == '+' && tn->lake_ix != lake_ix) printf("DBG: lake reached other lake!\n");
-			if (t->height < l->height) {
+
+			//The neighbour is <= lake height AND <= best_h
+			//always select < best_h, no further questions
+
+			//Outflow must be to a lower tile. Or to a same-height lake with different river_serial
+			//Not to a same_height tile, as it may eventually drain into the same lake again.
+
+			//Same-height tiles may instead add to the lake later
+
+			//if == best_h, select only if it is a lake with different river serial
+
+			if ( (tn->height < best_h) || (tn->terain == '+' && lake[tn->lake_ix].river_serial != river_serial) ) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
-				//Also check if there is a lake on the other tile:
-				//Water can flow to a lower lake, a same-height lake
-				//must merge!
-				//
+				best_h = nheight;
+				best_x = nx;
+				best_y = ny;
 			}
-		} //
+		} //neighbour scan
+
+		//Did we find an outlet?  If so, set up its use and return.
+		//Did we find a same_height lake with same river_serial?  If so, merge the lakes.
+
+		//No outlet yet? Scan neighbours again, add to the priority queue
+		//pick lowest tile t from the priority queue, and keep going.
+
 
 	} while (...);
 }
