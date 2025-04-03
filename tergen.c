@@ -2021,7 +2021,8 @@ void merge_lakes() {
 	fail("lake merging not implemented\n");
 }
 
-
+// ./tergen lakes 13 2 100 200 34 29
+//bug, gets a lake at 59,182 with outflow to 59,181 which flow directly into the lake again. Should not happen.
 
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
