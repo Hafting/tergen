@@ -2018,6 +2018,7 @@ printf("minfrom() returning height %i\n", ret->height);
 
 void merge_lakes() {
 	printf("no can do - not implemented yet\n");
+	fail("lake merging not implemented\n");
 }
 
 
@@ -2203,8 +2204,8 @@ printf("mountain  ");
 				int ny = wrap(y + nb[t->lowestneigh].dy, mapy);
 				tiletype *next = &tile[nx][ny];
 
-				//If the tile outlet is higher up, make a lake
-				if (next->height > t->height) {
+				//If the tile outlet is higher up (or equal), make a lake
+				if (next->height >= t->height) {
 					mk_lake(x, y, tile, i);
 					laketype *l = &lake[t->lake_ix];
 					x = l->outflow_x;
