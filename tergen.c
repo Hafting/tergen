@@ -2047,7 +2047,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		l->tiles++;
 		t->terrain = '+';
 		t->lake_ix = lake_ix;
-
+printf("tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->height,l->height);
 		//Iterate through tile neighbours,
 		//looking for a lower tile (or lower lake/sea)
 		//Find the best/lowest of possibly several outlets. Or none.
@@ -2057,6 +2057,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		int best_x = -1, best_y = -1;
 		short best_h = 20000;
 		int best_n = -1;
+printf("search for drain...\n");
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
@@ -2099,10 +2100,11 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 				l->outflow_y = y;
 				t->lowestneigh = best_n; //original might be different.
 				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
+printf("mk_lake() done\n");
 				return;
 			}
 		}
-
+printf("search for lake tile shore neighbours...\n");
 		//No outlet yet. Scan neighbours again, add to the priority queue.
 		//Then pick the lowest tile t from the priority queue, and keep going.
 		for (int n = neighbours[topo]; n--;) {
@@ -2113,10 +2115,12 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 
 			//Add the tile to the priority queue:
 			tn->lake_ix = lake_ix; //Also mark it
+printf("addto_priq()...\n");
 			addto_priq(l, tn);
 		}
 
 		//Find the next lowest lake edge tile
+printf("minfrom()...\n");	
 		t = minfrom_priq(l);
 		recover_xy(tile, t, &x, &y);
 	} while (true);
@@ -2160,6 +2164,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		if (t->mark || !t->waterflow) continue;
 		int x, y;
 		recover_xy(tile, t, &x, &y);
+printf("run_rivers() start from %i,%i  height:%i   (sea:%i)\n",x,y,t->height,seaheight);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
 		do {
@@ -2169,7 +2174,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				flow -= floodwater;
 				t->wetness += floodwater;
 			}
-
+printf("do:tile: %3i,%3i    height:%5i   (%c)", x,y,t->height,t->terrain);
 			//Accumulate waterflow through the tile
 			t->waterflow += flow;
 			if (!t->mark) {
@@ -2189,6 +2194,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			}
 
 			if (t->terrain == 'm') {
+printf("mountain  ");
 				//Look up the next tile
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 				int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
@@ -2196,25 +2202,37 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				tiletype *next = &tile[nx][ny];
 
 				//If the tile outlet is higher up, make a lake
-				if (next->height > t->height) mk_lake(x, y, tile, i);
-				else {
+				if (next->height > t->height) {
+					mk_lake(x, y, tile, i);
+					laketype *l = &lake[t->lake_ix];
+					x = l->outflow_x;
+					y = l->outflow_y;
+					t = &tile[x][y];
+					from_height = l->height;
+printf("transfer to outflow %3i,%3i height:%i", x,y,t->height);
+				} else {
 					//River proceeds downhill
 					from_height = t->height;
 					//Make the next tile current:
 					t = next;
 					x = nx; y = ny;
 				}
+printf("\n");
 			}
-
-			if (t->terrain == '+') {
+//bug found. Don't proceed into '+' after 'm', except when mklake() ran.
+			else if (t->terrain == '+') {
 				//The river ran into a lake. Transfer flow to the lake exit:
 				laketype *l = &lake[t->lake_ix];
+printf("tile is lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,t->lake_ix,l->height);
 				x = l->outflow_x;
 				y = l->outflow_y;
 				t = &tile[x][y];
 				from_height = l->height;
+printf("to outflow %3i,%3i height:%5i (%c)\n", x,y,t->height,t->terrain);
 			}
+printf("looping back?\n");
 		} while (t->terrain != ':');
+printf("reached sea\n");
 	}
 }
 
