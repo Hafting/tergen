@@ -613,7 +613,7 @@ int seacount(int x, int y, tiletype tile[mapx][mapy]) {
 char dfs_mark; //1 or 0
 int dfs_cnt;
 //Depth-first search to find the size of an ocean.
-void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) {
+void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) { return;
 	if (tile[x][y].mark == dfs_mark) return;
 	tile[x][y].mark = dfs_mark;
 	if (mklake) tile[x][y].terrain = '+';
@@ -626,7 +626,7 @@ void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) {
 	}
 }
 
-void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) {
+void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) { return;
 	dfs_cnt = 0;
 	dfs_mark = 1;
 	dfs_lake(x, y, tile, 0);
@@ -2077,14 +2077,23 @@ But, still failures:
 	Other bug:
 	./tergen lakes 13 1 40 60 4255555 29
 
+  Now:
+	./tergen lakes 13 1 40 60 425 29
+	
   Minor bugs: many lakes in the arctic. They should freeze
 	            loops im mk_lake should use step=2 for some topologies. See loops in run_river and fixups
+							- early attempt lead to bugs, postponed.
 
   Major bug: a lake touching the ocean. why? All ocean tiles are lower than land, a lake should not
              spread to the ocean edge. Did the sealevel change after last river run?
 						 FOUND. output() runs sealevel a last time. Needs fixing: no erosion or deposits the last round
              - attempted fix by "no height change in last round". Helped, but did not fix.
 						 - second fix, explicitly allow exit to sea tile of the same height. Helped, but did not fix
+
+             supremely annoying - WHY lake+sea?
+
+						 disabled dfs_lake(). Actually fixed some cases, do we have stray tile->mark again?
+						                      But did not fix ALL cases :-(
 
 */
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
