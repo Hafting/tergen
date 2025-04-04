@@ -643,6 +643,7 @@ void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) {
 
 //Convert lake to shallow sea, because it touches sea.
 //Recursively, so nothing remains
+//Should not be needed, not called any more.
 void lake_to_sea(int x, int y, tiletype tile[mapx][mapy]) {
 	if (tile[x][y].terrain == '+') {
 		tile[x][y].terrain = ' ';
@@ -816,11 +817,11 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
 	for (int i = 0; i < seatiles; ++i) {
-		tp[i]->terrain = ':'; tp[i]->mark=47;
+		tp[i]->terrain = ':';
 		tp[i]->wetness = 1000; //In case the tile surfaces later, avoid too much fake wetness
 	}
 	for (int i = seatiles; i < tilecnt; ++i) {
-		if (tp[i]->terrain != '+') tp[i]->terrain = 'm'; tp[i]->mark=9;
+		if (tp[i]->terrain != '+') tp[i]->terrain = 'm';
 	}
 	//temperatures. Land temperatures fall with elevation. About 10C per km up
   for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
@@ -1726,6 +1727,7 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
   than x,y.  If so, set newx,newy to the near neighbour, and flatten the near
   neighbour	so the river may escape that way.
 	Return true on success, false on failure.
+	NO LONGER USED, we have big lakes now.
 */
 bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *newx, int *newy, short seaheight) {
 	short maxheight = below - 2; // "-2" avoids loops, allow only strictly lower tiles
@@ -2076,10 +2078,13 @@ But, still failures:
 	./tergen lakes 13 1 40 60 4255555 29
 
   Minor bugs: many lakes in the arctic. They should freeze
+	            loops im mk_lake should use step=2 for some topologies. See loops in run_river and fixups
+
   Major bug: a lake touching the ocean. why? All ocean tiles are lower than land, a lake should not
              spread to the ocean edge. Did the sealevel change after last river run?
-						 FOUND. output() runs sealevel a last time. Needs fixing.
-
+						 FOUND. output() runs sealevel a last time. Needs fixing: no erosion or deposits the last round
+             - attempted fix by "no height change in last round". Helped, but did not fix.
+						 - second fix, explicitly allow exit to sea tile of the same height. Helped, but did not fix
 
 */
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
@@ -2111,7 +2116,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		l->tiles++;
 		t->terrain = '+';
 		t->lake_ix = lake_ix;
-printf("tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->height,l->height);
+printf("mk_lake tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->height,l->height);
 		//Iterate through tile neighbours, in search of a drain.
 		//looking for a lower tile (or lower lake/sea)
 		//Find the best/lowest of possibly several outlets. Or none.
@@ -2123,10 +2128,11 @@ printf("tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->h
 		int best_n = -1;
 printf("search for drain...\n");
 		int lakes_to_merge = 0; //We may find one. Or in rare cases, two.
+		int n_inc = (topo < 2) ? 2 : 1; //No diagonal rivers in square topologies
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
-			tiletype *tnn = &tile[nx][ny]; //nn: neighbour's neighbour...
+			tiletype *tnn = &tile[nx][ny]; //tnn: tile neighbour's neighbour...
 			if (tnn->lake_ix == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
 			short nnheight = (tnn->terrain == '+') ? lake[tnn->lake_ix].height : tnn->height;
@@ -2149,8 +2155,9 @@ printf("search for drain...\n");
 			//Same-height tiles may instead add to the lake later
 
 			//if == best_h, select only if it is a lake with different river serial
+			//Some land tiles and some sea tiles may have the same height. So test for sea tiles.
 
-			if ( (nnheight < best_h) || ( (tnn->terrain == '+') && (lake[tnn->lake_ix].river_serial != river_serial)) ) {
+			if ( (nnheight < best_h) || (tnn->terrain == ':') || ( (tnn->terrain == '+') && (lake[tnn->lake_ix].river_serial != river_serial)) ) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
 				best_h = nnheight;
@@ -2193,6 +2200,7 @@ printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_me
 			//Higher tiles go on the priority queue. Neighbour lakes gets merged.
 			if (tn->terrain == '+') merge_lakes(); else {
 				//Add the tile to the priority queue:
+if (tn->terrain == ':') printf("SEA neighbour???\n");
 				tn->lake_ix = lake_ix; //Also mark it
 printf("addto_priq()...\n");
 				addto_priq(l, tn);
@@ -2281,7 +2289,7 @@ printf("mountain  ");
 				tiletype *next = &tile[nx][ny];
 
 				//If the tile outlet is higher up (or equal), make a lake
-				//exception: flowing to the same height is ok, if it is a lake.
+				//exception: flowing to the same height is ok, if it is a lake/sea
 				if ( (next->height > t->height) || (next->height == t->height && next->terrain == 'm') ) {
 					mk_lake(x, y, tile, i);
 					laketype *l = &lake[t->lake_ix];
@@ -2556,71 +2564,77 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	printf("Plate tectonics with %i plates\n", plates);
 	int asteroids = mapx / 16;
 	for (int i = 1; i <= rounds; ++i) {
-		//Move the plates
-		for (int p = 0; p < plates; ++p) {
-			platetype *pl = &plate[p];
-			pl->cx += pl->vx;
-			pl->cy += pl->vy;	
-			//Is the plate now closer to some neighbour tile, than the old center?
-			float dx = pl->ocx - pl->cx;
-			float dy = pl->ocy - pl->cy;
-			float sqdisto = dx*dx+dy*dy;
-			//Find the closest, if any
-			float sqdist_best = sqdisto;
-			int nearest_n = -1;
 
-			for (int n = neighbours[topo]; n--;) {
-				neighpostype *neigh = np+n;
-				dx = pl->ocx + neigh->dx - pl->cx;
-				dy = pl->ocy + neigh->dy - pl->cy;
-				float sqdistn = dx*dx+dy*dy;
-				if ((sqdistn < sqdisto) && (sqdistn < sqdist_best)) {
-					//Find the best plate move, if any.
-					sqdist_best = sqdistn;
-					nearest_n = n;
-				} 
+		//No heightmap changes the LAST round.
+		//This prevents sealevel changes that could leave rivers stopped
+		//before the coast, or drown the edge between a lake and the sea.
+		if (i < rounds) { //Allow height changes from tectonics/erosion/deposits
+
+			//Move the plates
+			for (int p = 0; p < plates; ++p) {
+				platetype *pl = &plate[p];
+				pl->cx += pl->vx;
+				pl->cy += pl->vy;
+				//Is the plate now closer to some neighbour tile, than the old center?
+				float dx = pl->ocx - pl->cx;
+				float dy = pl->ocy - pl->cy;
+				float sqdisto = dx*dx+dy*dy;
+				//Find the closest, if any
+				float sqdist_best = sqdisto;
+				int nearest_n = -1;
+
+				for (int n = neighbours[topo]; n--;) {
+					neighpostype *neigh = np+n;
+					dx = pl->ocx + neigh->dx - pl->cx;
+					dy = pl->ocy + neigh->dy - pl->cy;
+					float sqdistn = dx*dx+dy*dy;
+					if ((sqdistn < sqdisto) && (sqdistn < sqdist_best)) {
+						//Find the best plate move, if any.
+						sqdist_best = sqdistn;
+						nearest_n = n;
+					}
+				}
+				if (nearest_n > -1) {
+					//Move the plate in direction of the closest neighbour tile
+					moveplate(pl, nearest_n, tile);
+					pl->ocx += np[nearest_n].dx;
+					pl->ocy += np[nearest_n].dy;
+				}
+
 			}
-			if (nearest_n > -1) {
-				//Move the plate in direction of the closest neighbour tile
-				moveplate(pl, nearest_n, tile);
-				pl->ocx += np[nearest_n].dx;
-				pl->ocy += np[nearest_n].dy;
-			}
-
-		}
-		/* Run weather & erosion */
-		if (asteroids && !(random() % (mapx/16)) ) {
-			--asteroids;
-			asteroid_strike(tile);
-		}
-
-		//Let moved rocks become sediments.
-		//Apply erosion planned the previous round.
-		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-			tiletype *t = &tile[x][y];
-			int sediment_percent;
-			switch (t->terrain) {
-				case ':': //sea
-					sediment_percent = 90;
-					break;
-				case '+': //lake
-					sediment_percent = 75;
-					break;
-				default:
-					sediment_percent = 20;
-					break;
+			/* Run weather & erosion */
+			if (asteroids && !(random() % (mapx/16)) ) {
+				--asteroids;
+				asteroid_strike(tile);
 			}
 
-			//Some loose rocks becomes sediments:
-			int rocks = t->rocks * sediment_percent / 100;
-			t->height += rocks;
-			t->rocks -= rocks;
-			//Apply any deferred erosion, terrain becomes loose rocks:
-			t->height -= t->erosion;
-			t->rocks += t->erosion;
-			t->erosion = 0;
-		}
+			//Let moved rocks become sediments.
+			//Apply erosion planned the previous round.
+			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+				tiletype *t = &tile[x][y];
+				int sediment_percent;
+				switch (t->terrain) {
+					case ':': //sea
+						sediment_percent = 90;
+						break;
+					case '+': //lake
+						sediment_percent = 75;
+						break;
+					default:
+						sediment_percent = 20;
+						break;
+				}
 
+				//Some loose rocks becomes sediments:
+				int rocks = t->rocks * sediment_percent / 100;
+				t->height += rocks;
+				t->rocks -= rocks;
+				//Apply any deferred erosion, terrain becomes loose rocks:
+				t->height -= t->erosion;
+				t->rocks += t->erosion;
+				t->erosion = 0;
+			}
+		}
 #ifdef DBG		
 		printf("weather, round %i\n",i);
 		printf("evaporation\n");
@@ -2757,26 +2771,27 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		printf("run rivers\n");
 #endif	
 		run_rivers(seaheight, tile, tp);
-		mass_transport(tile, tp);
+		if (i < rounds) {
+			mass_transport(tile, tp);
 #ifdef DBG
-		printf("erode terrain\n");
+			printf("erode terrain\n");
 #endif
-		//Use water flow and rock flow to erode the terrain
-		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-			tiletype *t = &tile[x][y];
-			//More water moves more rocks. And more with more steepness
-			//Water erodes along the river bottom, which is part of the
-			//waterflow circumference. The circumference is proportional to
-			//the square root of the flow area.
-			if (t->terrain == 'm') {
-				t->erosion = (sqrtf(t->waterflow) * t->steepness * 4.5) / rounds; //Erosion from waterflow  5 better than 4?
-				t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
+			//Use water flow and rock flow to erode the terrain
+			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+				tiletype *t = &tile[x][y];
+				//More water moves more rocks. And more with more steepness
+				//Water erodes along the river bottom, which is part of the
+				//waterflow circumference. The circumference is proportional to
+				//the square root of the flow area.
+				if (t->terrain == 'm') {
+					t->erosion = (sqrtf(t->waterflow) * t->steepness * 4.5) / rounds; //Erosion from waterflow  5 better than 4?
+					t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
 
-//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
+					//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
 
-			} else t->erosion = 0;
+				} else t->erosion = 0;
+			}
 		}
-
 	}
 
 	//print_platemap(tile); //dbg
