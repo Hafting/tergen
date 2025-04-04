@@ -2020,15 +2020,63 @@ void merge_lakes() {
 	printf("no can do - not implemented yet\n");
 	fail("lake merging not implemented\n");
 }
-
+/*
 // ./tergen lakes 13 2 100 200 34 29
 //bug, gets a lake at 59,182 with outflow to 59,181 which flow directly into the lake again. Should not happen.
+//
+//makes one lake. the lake output reaches the sea.
+//makes sec lake, reaches sea
+//      3rd lake, sea
+//      4th lake, sea
+        5, sea
+				6, sea
+				7, sea
+				8, sea outf 7,177 27 tiles
 
+Gets a 1-tile lake where the ourtflow tile flows back into the lake. But immediately before that:
+DBG: lake reached other lake!
+
+So:
+  start lake 16 on  60,182, height 2283
+	possible drain on 59,181, height 2285 lake raised to 2285
+	drain into lake 15, height 2285, on ?    lake 15 has different river serial, SHOULD be ok
+
+	mk_lake ends
+	water to 59,181 (outflow tile).
+	water proceeds to 69,182 which is lake 15. But lake 15 also has outflow tile 59,181 - loop
+
+	two lakes MAY share an outflow tile. But then, the out-tile must not flow into the other lake!
+
+	Why was not the working outflow kept ???
+
+	* fix: use nnheight instead of mistakenly using tnn->height (which discards the lakeheight above)
+
+But still failures:
+	Now, makes a 3-tile lake with outflow tile 74,154 (has different river_serial lake as neighbour)
+	uses 74,154 as outflow, further flow into that lake.
+
+	The lake completes. River flow resumes at 74,154 as it should. But straight to
+	mk_lake(74,154)  WHY.  Don't make a lake on the outlet, when we know the outlet IS a feasible
+	outlet.
+
+	run_rivers unwilling to flow to same height, even though it is a lake?
+
+	* fixed that.
+
+But, still failures:
+	minfrom() returning height 2274
+	impossible, tile lower than lake?
+
+	Here, tiles WITH lake was added as lake neighbours. That should not happen. Of course they
+	were lower, tile height only goes up to the lake bottom.
+
+*/
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
 	printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
 #endif
 	int lake_ix = lakes;
+	if (lake_ix > MAX_LAKES) fail("Too many lakes, recompile with bigger MAX_LAKES");
 	laketype *l = &lake[lakes++];
 
 	l->tiles = 0;
@@ -2046,8 +2094,8 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 
 		if (t->height < l->height) fail("impossible, tile lower than lake?\n");
 
-		//Adjust lake height to tile height. A lower tile should not be possible, but...
-		l->height = (t->height > l->height) ? t->height : l->height;
+		//Adjust lake height to tile height. A lower tile is not possible
+		l->height = t->height;
 		//Add tile to lake, Undo if it becomes an outlet
 		l->tiles++;
 		t->terrain = '+';
@@ -2066,14 +2114,20 @@ printf("search for drain...\n");
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
-			tiletype *tn = &tile[nx][ny];
-			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
+			tiletype *tnn = &tile[nx][ny]; //nn: neighbour's neighbour...
+			if (tnn->lake_ix == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
-			short nheight = (tn->terrain == '+') ? lake[tn->lake_ix].height : tn->height;
-			if ( (tn->height > l->height) || (tn->height > best_h)) continue; //Skip useless
+			short nnheight = (tnn->terrain == '+') ? lake[tnn->lake_ix].height : tnn->height;
+			if ( (nnheight > l->height) || (nnheight > best_h)) continue; //Skip useless
 
-			if ((tn->terrain == '+') && (tn->lake_ix != lake_ix)) printf("DBG: lake reached other lake!\n"); //not necessarily a problem
-
+			if ((tnn->terrain == '+') && (tnn->lake_ix != lake_ix)) {
+				printf("DBG: lake reached other lake!\n");
+				printf("this ix:     %5i other ix:     %5i\n",lake_ix,tnn->lake_ix);
+				printf("this height: %5i other height: %5i  other tile height: %5i\n", l->height, lake[tnn->lake_ix].height, tnn->height);
+				printf("this rserial:%5i other rserial:%5i\n", l->river_serial, lake[tnn->lake_ix].river_serial);
+				printf("laketile is neighbour number:  %5i\n",n);
+				//not necessarily a problem. but it precedes a bug...
+			}
 			//The neighbour is <= lake height AND <= best_h
 			//always select < best_h, no further questions
 
@@ -2084,18 +2138,19 @@ printf("search for drain...\n");
 
 			//if == best_h, select only if it is a lake with different river serial
 
-			if ( (tn->height < best_h) || ( (tn->terrain == '+') && (lake[tn->lake_ix].river_serial != river_serial)) ) {
+			if ( (nnheight < best_h) || ( (tnn->terrain == '+') && (lake[tnn->lake_ix].river_serial != river_serial)) ) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
-				best_h = nheight;
+				best_h = nnheight;
 				best_x = nx;
 				best_y = ny;
 				best_n = n;
 			}
-		} //neighbour scan
+		} //drain search
 
 		//Did we find an outlet?  If so, set up its use and return.
-		//Did we find a same_height lake with same river_serial?  If so, merge the lakes.
+		//Did we find a same_height lake with same river_serial?  If so, merge the lakes. 
+		//worse: in theory, there could be several lakes to merge!
 		if (best_n != -1) { //Found something
 			tiletype *tn = &tile[best_x][best_y];
 			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();
@@ -2106,7 +2161,7 @@ printf("search for drain...\n");
 				t->lowestneigh = best_n; //original might be different.
 				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
 				l->tiles--;
-printf("mk_lake() done. outflow tile %3i,%3i. Lake tiles:%i\n",x,y,l->tiles);
+printf("mk_lake() done. ix=%i outflow tile %3i,%3i. Lake tiles:%i  (flow neighbour:%i)\n",lake_ix,x,y,l->tiles,best_n);
 				return;
 			}
 		}
@@ -2126,7 +2181,6 @@ printf("addto_priq()...\n");
 		}
 
 		//Find the next lowest lake edge tile
-printf("minfrom()...\n");	
 		t = minfrom_priq(l);
 		recover_xy(tile, t, &x, &y);
 	} while (true);
@@ -2208,14 +2262,15 @@ printf("mountain  ");
 				tiletype *next = &tile[nx][ny];
 
 				//If the tile outlet is higher up (or equal), make a lake
-				if (next->height >= t->height) {
+				//exception: flowing to the same height is ok, if it is a lake.
+				if ( (next->height > t->height) || (next->height == t->height && next->terrain == 'm') ) {
 					mk_lake(x, y, tile, i);
 					laketype *l = &lake[t->lake_ix];
 					x = l->outflow_x;
 					y = l->outflow_y;
 					t = &tile[x][y];
 					from_height = l->height;
-printf("transfer to outflow %3i,%3i height:%i", x,y,t->height);
+printf("made lake, transfer to outflow %3i,%3i height:%i", x,y,t->height);
 				} else {
 					//River proceeds downhill
 					from_height = t->height;
@@ -2224,20 +2279,16 @@ printf("transfer to outflow %3i,%3i height:%i", x,y,t->height);
 					x = nx; y = ny;
 				}
 printf("\n");
-			}
-//bug found. Don't proceed into '+' after 'm', except when mklake() ran.
-//fixing this did not help, as mklake() made a waterflow loop anyway :-(
-			else if (t->terrain == '+') {
+			} else if (t->terrain == '+') {
 				//The river ran into a lake. Transfer flow to the lake exit:
 				laketype *l = &lake[t->lake_ix];
-printf("tile is lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,t->lake_ix,l->height);
+printf("hit a lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,t->lake_ix,l->height);
 				x = l->outflow_x;
 				y = l->outflow_y;
 				t = &tile[x][y];
 				from_height = l->height;
 printf("to outflow %3i,%3i height:%5i (%c)\n", x,y,t->height,t->terrain);
 			}
-printf("looping back?\n");
 		} while (t->terrain != ':');
 printf("reached sea\n");
 	}
