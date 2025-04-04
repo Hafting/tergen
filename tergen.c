@@ -2070,6 +2070,17 @@ But, still failures:
 	Here, tiles WITH lake was added as lake neighbours. That should not happen. Of course they
 	were lower, tile height only goes up to the lake bottom.
 
+  * fixed that too.
+
+	Other bug:
+	./tergen lakes 13 1 40 60 4255555 29
+
+  Minor bugs: many lakes in the arctic. They should freeze
+  Major bug: a lake touching the ocean. why? All ocean tiles are lower than land, a lake should not
+             spread to the ocean edge. Did the sealevel change after last river run?
+						 FOUND. output() runs sealevel a last time. Needs fixing.
+
+
 */
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
@@ -2111,6 +2122,7 @@ printf("tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->h
 		short best_h = l->height;
 		int best_n = -1;
 printf("search for drain...\n");
+		int lakes_to_merge = 0; //We may find one. Or in rare cases, two.
 		for (int n = neighbours[topo]; n--;) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
@@ -2145,7 +2157,7 @@ printf("search for drain...\n");
 				best_x = nx;
 				best_y = ny;
 				best_n = n;
-			}
+			} else lakes_to_merge += (tnn->terrain == '+' && (lake[tnn->lake_ix].river_serial == river_serial));
 		} //drain search
 
 		//Did we find an outlet?  If so, set up its use and return.
@@ -2153,7 +2165,7 @@ printf("search for drain...\n");
 		//worse: in theory, there could be several lakes to merge!
 		if (best_n != -1) { //Found something
 			tiletype *tn = &tile[best_x][best_y];
-			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();
+			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();//can't happen now
 			else {
 				//What we found, was a useable outlet. So, use it.
 				l->outflow_x = x;
@@ -2165,7 +2177,11 @@ printf("mk_lake() done. ix=%i outflow tile %3i,%3i. Lake tiles:%i  (flow neighbo
 				return;
 			}
 		}
-printf("search for lake tile shore neighbours...\n");
+
+		//No drain was found, so this tile will be part of the lake.
+		//If any neighbours were other lakes, they must merge during the next scan:
+
+printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_merge);
 		//No outlet yet. Scan neighbours again, add to the priority queue.
 		//Then pick the lowest tile t from the priority queue, and keep going.
 		for (int n = neighbours[topo]; n--;) {
@@ -2174,10 +2190,13 @@ printf("search for lake tile shore neighbours...\n");
 			tiletype *tn = &tile[nx][ny];
 			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
 
-			//Add the tile to the priority queue:
-			tn->lake_ix = lake_ix; //Also mark it
+			//Higher tiles go on the priority queue. Neighbour lakes gets merged.
+			if (tn->terrain == '+') merge_lakes(); else {
+				//Add the tile to the priority queue:
+				tn->lake_ix = lake_ix; //Also mark it
 printf("addto_priq()...\n");
-			addto_priq(l, tn);
+				addto_priq(l, tn);
+			}
 		}
 
 		//Find the next lowest lake edge tile
