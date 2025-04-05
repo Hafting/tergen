@@ -579,17 +579,17 @@ int q_compare_temperature(void const *p1, void const *p2) {
 
 //Test for sea, deep or shallow 
 bool is_sea(char c) {
-	return c == ' ' | c == ':';
+	return (c == ' ') | (c == ':');
 }
 
 //Test for arctic terrain. 
 bool is_arctic(char c) {
-	return c == 'a' | c == 'A';
+	return (c == 'a') | (c == 'A');
 }
 
 //Test for mountain
 bool is_mountain(char c) {
-	return c == 'm' | c == 'v';
+	return (c == 'm') | (c == 'v');
 }
 
 //Test if a tile is wet. Sea, lake, or land with river on it
@@ -613,7 +613,7 @@ int seacount(int x, int y, tiletype tile[mapx][mapy]) {
 char dfs_mark; //1 or 0
 int dfs_cnt;
 //Depth-first search to find the size of an ocean.
-void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) { return;
+void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) {
 	if (tile[x][y].mark == dfs_mark) return;
 	tile[x][y].mark = dfs_mark;
 	if (mklake) tile[x][y].terrain = '+';
@@ -626,7 +626,7 @@ void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) { return;
 	}
 }
 
-void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) { return;
+void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) {
 	dfs_cnt = 0;
 	dfs_mark = 1;
 	dfs_lake(x, y, tile, 0);
@@ -713,6 +713,7 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 				if (num >= neighcount) {
 					t->terrain = ' '; //Drown the island
 					t->river = 0;
+					t->mark = 0; //Sea tiles must not be marked
 				} else {
 					int nx = wrap(x+nb[num].dx, mapx);
 					int ny = wrap(y+nb[num].dy, mapy);
@@ -819,6 +820,7 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	for (int i = 0; i < seatiles; ++i) {
 		tp[i]->terrain = ':';
 		tp[i]->wetness = 1000; //In case the tile surfaces later, avoid too much fake wetness
+		tp[i]->lake_ix = -1;   //Avoid lake remnants in the sea
 	}
 	for (int i = seatiles; i < tilecnt; ++i) {
 		if (tp[i]->terrain != '+') tp[i]->terrain = 'm';
@@ -2094,7 +2096,10 @@ But, still failures:
 
 						 disabled dfs_lake(). Actually fixed some cases, do we have stray tile->mark again?
 						                      But did not fix ALL cases :-(
+						 fix: seatiles->lake_ix = -1.  No lakes in the sea!
 
+						 fix: reset tile mark when islands are drowned in fixups.
+						 Finally, no lakes in the sea.
 */
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
