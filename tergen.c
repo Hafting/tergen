@@ -2100,6 +2100,23 @@ But, still failures:
 
 						 fix: reset tile mark when islands are drowned in fixups.
 						 Finally, no lakes in the sea.
+
+
+						 Next problem: changing the neighbour ORDER in mk_lake
+						 should have no effect on correctness, although
+						 lakes may grow slightly different (when there is choice.)
+
+						 Sadly, this leads to inf.loops again.
+						 Making lake 10 serial 1884, outflow to lake 2 serial 2191
+						 made single tile lake 10, outflow to 14,27
+             run_rivers:
+						 tile 14,27 height 2259 (m)
+						 tile 14,25 height 2259 (+) hit lake 2 [as expected]
+						            outflow to 14,27  - which of course loops forever
+
+             WHY was not the orgiginal next rivertile for 14,27 kept then? mk_lake is making a mistake here?
+						 Fixed that too.
+
 */
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
@@ -2143,22 +2160,26 @@ printf("mk_lake tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", 
 printf("search for drain...\n");
 		int lakes_to_merge = 0; //We may find one. Or in rare cases, two.
 		int n_inc = (topo < 2) ? 2 : 1; //No diagonal rivers in square topologies
-		for (int n = neighbours[topo]; n--;) {
+//		for (int n = neighbours[topo]; n--;) {
+		printf("lowest neighbour before drain search: %i\n", t->lowestneigh);
+		for (int n = 0; n < neighbours[topo]; n += n_inc) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tnn = &tile[nx][ny]; //tnn: tile neighbour's neighbour...
+printf("n=%i ",n);
 			if (tnn->lake_ix == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
 			short nnheight = (tnn->terrain == '+') ? lake[tnn->lake_ix].height : tnn->height;
+printf("nnheight=%i  ",nnheight);
 			if ( (nnheight > l->height) || (nnheight > best_h)) continue; //Skip useless
-
+printf("not useless\n");
 			if ((tnn->terrain == '+') && (tnn->lake_ix != lake_ix)) {
 				printf("DBG: lake reached other lake!\n");
 				printf("this ix:     %5i other ix:     %5i\n",lake_ix,tnn->lake_ix);
 				printf("this height: %5i other height: %5i  other tile height: %5i\n", l->height, lake[tnn->lake_ix].height, tnn->height);
 				printf("this rserial:%5i other rserial:%5i\n", l->river_serial, lake[tnn->lake_ix].river_serial);
 				printf("laketile is neighbour number:  %5i\n",n);
-				//not necessarily a problem. but it precedes a bug...
+				//not necessarily a problem. But this case precedes many a bug...
 			}
 			//The neighbour is <= lake height AND <= best_h
 			//always select < best_h, no further questions
@@ -2166,10 +2187,16 @@ printf("search for drain...\n");
 			//Outflow must be to a lower tile. Or to a same-height lake with different river_serial
 			//Not to a same_height tile, as it may eventually drain into the same lake again.
 
+			//exception: if the same-height tile is ok, because a lake with different river_serial drains into it.
+			//that guarantees the exit works (or we wouldn't get here)
+
+			//Also, never ever drain into a lake that drains into THIS tile.
+
 			//Same-height tiles may instead add to the lake later
 
 			//if == best_h, select only if it is a lake with different river serial
 			//Some land tiles and some sea tiles may have the same height. So test for sea tiles.
+
 
 			if ( (nnheight < best_h) || (tnn->terrain == ':') || ( (tnn->terrain == '+') && (lake[tnn->lake_ix].river_serial != river_serial)) ) {
 				//Found a possible outlet!
@@ -2177,7 +2204,9 @@ printf("search for drain...\n");
 				best_h = nnheight;
 				best_x = nx;
 				best_y = ny;
-				best_n = n;
+				if ( tnn->terrain == '+' && lake[tnn->lake_ix].river_serial != river_serial && lake[tnn->lake_ix].outflow_x == x && lake[tnn->lake_ix].outflow_y == y ) best_n = t->lowestneigh; //Other lake drains here, so NO CHANGE
+				else best_n = n; //Normal case
+
 			} else lakes_to_merge += (tnn->terrain == '+' && (lake[tnn->lake_ix].river_serial == river_serial));
 		} //drain search
 
@@ -2205,7 +2234,8 @@ printf("mk_lake() done. ix=%i outflow tile %3i,%3i. Lake tiles:%i  (flow neighbo
 printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_merge);
 		//No outlet yet. Scan neighbours again, add to the priority queue.
 		//Then pick the lowest tile t from the priority queue, and keep going.
-		for (int n = neighbours[topo]; n--;) {
+//		for (int n = neighbours[topo]; n--;) {
+		for (int n = 0; n < neighbours[topo]; n += n_inc) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tn = &tile[nx][ny];
