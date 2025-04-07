@@ -887,17 +887,51 @@ void set_parts(int tempered, int wateronland, float *dp, float *pp, float *gp, f
 	*psum = *dp + *pp + *gp + *fp + *jp + *sp;
 }
 
-void assign_rivers(tiletype **tp, int seatiles, int landtiles, int wateronland) {
+
+int lakes;
+laketype lake[MAX_LAKES];
+
+
+/*
+	New approach for assigning rivers:
+	a. sort tiles on waterflow
+	b. set all tiles to "no river"
+	c. start at every tile with enough flow. Run a visible river, stopping only when
+	   reaching sea, lake, or an already made river.
+		 This solves (1) above
+	d. also start at every lake outflow tile. Run a visible river from there. Solves (2) above.
+	The only riverless lakes after this, will be pieces of converted sea.
+	 */
+
+//Run a single river to the sea/a lake/another river
+void run_visible_river(int x, int y, tiletype tile[mapx][mapy]) {
+	while (1) {
+		tiletype *t = &tile[x][y];
+		if (t->river | (t->terrain == ':') | (t->terrain == ' ') | (t->terrain == '+') ) return;
+		t->river = 1;
+		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		x = wrap(x + nb[t->lowestneigh].dx, mapx);
+		y = wrap(y + nb[t->lowestneigh].dy, mapy);
+	}
+}
+
+void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy]) {
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
-	int limit, j = 0;
+	for (int i = seatiles; i < mapx*mapy; ++i) tp[i]->river = 0; //Initially, no visible rivers
 	int rivertiles = landtiles * wateronland / 200; //More than 50% river tiles is useless anyway
 	int nonrivers = landtiles - rivertiles;
-	for (limit = seatiles + nonrivers; j < limit; ++j) {
-		tp[j]->river = 0;
+	//Start visible rivers from all high-flow tiles:
+	for (int i = seatiles + nonrivers; i < mapx*mapy; ++i) {
+		int x, y;
+		recover_xy(tile, tp[i], &x, &y);
+		run_visible_river(x, y, tile);
 	}
-	for (limit += rivertiles; j < limit; ++j) {
-		tp[j]->river = (tp[j]->terrain != '+' && tp[j]->waterflow > 0) ? 1 : 0; 
-	}	
+	//Start visible rivers from all lake exit tiles:
+	for (int i = 0; i < lakes; ++i) {
+		laketype *l = &lake[i];
+		if (l->merged_into != -1) continue;
+		run_visible_river(l->outflow_x, l->outflow_y, tile);
+	}
 }
 
 void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
@@ -1102,12 +1136,11 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 #endif
 
 	//Assign the rivers
-	assign_rivers(tp, seatiles, landtiles, wateronland);
+	assign_rivers(tp, wateronland, tile);
 
   terrain_fixups(tile, tp, seatiles, deepsea, landtiles);
-	
-	output_terrain(f, tile, false);
 
+	output_terrain(f, tile, false);
 }
 
 void set_tile(tiletype *t, char lowtype, char hilltype) {
@@ -1313,7 +1346,7 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	for (; j < limit; ++j) set_tile(tp[j], 's', 'J');
 
 	//Terrain done, set up the rivers
-	assign_rivers(tp, seatiles, landtiles, wateronland);
+	assign_rivers(tp, wateronland, tile);
 
 	assign_volcanoes(tile, tp, mountains, seatiles);
 
@@ -1756,8 +1789,6 @@ void asteroid_strike(tiletype tile[mapx][mapy]) {
 	}
 }
 
-int lakes;
-laketype lake[MAX_LAKES];
 tiletype *priq[MAX_PRIQ];
 
 //Add to a priority queue/heap
