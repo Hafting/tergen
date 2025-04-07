@@ -337,6 +337,8 @@ int tileset; //0=normal. Otherwise, extended tileset toonhex+ where lowland
              //tiles also have a hill form. (arctic hill, desert hill, ...)
 int wrapmap; //0:no map wrap, 1: x-wrap 2:xy-wrap
 
+int landtiles, seatiles; //set by sealevel() Close to user wishes, but some dependency on height map details
+
 char *wraptxt[3] = {"", "WRAPX", "WRAPX|WRAPY"};
 char *topotxt[4] = {"", "ISO", "HEX", "ISO|HEX"};
 
@@ -809,13 +811,20 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 //x% of the tiles are sea, so the last sea tile gives the sea height.
 //Also determine tile temperatures based on being sea or land
 //Done every round, as erotion & tectonics change tile heights & sea level
+//Ensure that all sea tiles are lower than all land tiles, even if the land/sea ratio won't be perfect.
 short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy]) {
 	//Find the sea level by sorting on height. "land" is the percentage of land tiles
 	int tilecnt = mapx*mapy;
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
-	int landtiles = land * tilecnt / 100;
-	int seatiles = tilecnt - landtiles;
-	short level = tp[seatiles ? seatiles-1 : 0]->height;
+	landtiles = land * tilecnt / 100;
+	seatiles = tilecnt - landtiles;
+	if (!seatiles) seatiles = 1; //We'll crash with no sea at all. Where would rivers end?
+	//seatiles is the number of sea tiles, and index of the first land tile.
+	//Several tiles may have the same height. Move "seatiles" so the first land tile
+	//is higher up than the last sea tile.
+	while (tp[seatiles]->height == tp[seatiles-1]->height) ++seatiles;
+	landtiles = tilecnt - seatiles;
+	short level = tp[seatiles-1]->height;
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
 	for (int i = 0; i < seatiles; ++i) {
@@ -1021,9 +1030,7 @@ It also affect the amount of desert and the forest/jungle allocation. 50 is norm
 */
 void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 	int i = mapx*mapy;
-	sealevel(tp, land, tile, weather); //Also sorts on height
-	int landtiles = land * i / 100;
-  int seatiles = i - landtiles;
+	sealevel(tp, land, tile, weather); //Also sorts on height, and sets seatiles and landtiles
 	int shallowsea = seatiles/3;
 	int deepsea = seatiles - shallowsea;
 
@@ -1220,8 +1227,8 @@ Terrain assignment for extended tile set:
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 
 	int i = mapx * mapy;
-	int landtiles = land * i / 100;
-	int seatiles = i - landtiles;
+	//Sort on height, determine sea level, correct tile temperatures. Also sets seatiles and landtiles
+	sealevel(tp, land, tile, weather);
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
@@ -1232,9 +1239,6 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
 
 	//Classify terrain by height, and sometimes temperature
-	//Sort on height, determine sea level, correct tile temperatures
-	sealevel(tp, land, tile, weather);
-
 	int limit, j = 0;
 	//Deep sea or ice
 	for (; j < deepseatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
@@ -2040,22 +2044,61 @@ int lookup_lake_ix(tiletype *t) {
 }
 
 /*
+Of course, lake merging turned up more bugs.
+Got this loop:
+do:tile:  27, 76    height: 2293   (m)mountain  
+do:tile:  27, 75    height: 2293   (+)hit a lake, pos: 27, 75 ix=  124, at lake height  2293  to outflow  27, 77 height: 2293 (m)
+do:tile:  27, 77    height: 2293   (m)mountain  
+do:tile:  27, 79    height: 2293   (+)hit a lake, pos: 27, 79 ix=   69, at lake height  2293  to outflow  27, 76 height: 2293 (m)
+Two lakes flowing into each other :-(
+
+And - 2293 is sea height. 
+
+Lake 124 creation:
+ lake tile at 27,75  surrounded
+ neighbour tile at 27,77 becomes a drain tile. It neighbours lake 69 which has a different exit tile. So drain
+ into lake 69 pos 27,79    All this seems ok.
+
+ The older lake 69 has successful outflow at 27,76. but from 27,76 we get to 27,75 which is lake 124. (loop)
+ WHY?  Lake 69 was successful earlier. Why then, was it necessary to mk_lake at 27,79 now?
+ Failure to notice a sea tile??? Yep. The sea tile is not necessarily LOWER. :-(
+
+Simplification: Ensure that all sea tiles are LOWER than all land tiles. Simplifies things, even if the
+land to sea ratio won't be perfect. sealevel() does the partitioning.
+
+Now, this solved some problems!  Sea is always lower than land, so no longer a need to search 
+specifically for sea tiles. They will always be found because they are lower.
+
+But still problems. A world with 80% land (or even 35%) expect more/larger lakes. But they hang:
+
+
+	 */
+
+/*
   Lake merge process:
 	* old lake merges into the new lake that is eating it
 	* the old lake's priq tiles are added to the new priq, unless already discovered
 	  - ensures that all lake neighbourhood tiles are on the priq
 	* the old lake's outlet must be added to the new priq too
-	* lake tiles is not added immediately. This is deferred to lake_ix lookup time, for efficiency
+	* lake tiles are not added immediately. They are deferred to lake_ix lookup time, for efficiency
 	  - a lake_ix() lookup function is needed, instead of using ->lake_ix directly
 		- laketype needs a field specifying what lake it has been merged into
 		- path compression is used on looking up this field.
 	 */
 
-void merge_lakes(int old_lake, int new_lake) {
+void merge_lakes(int old_lake, int new_lake, tiletype *old_outlet) {
 	printf("merge lakes(), merging lake %i into lake %i\n", old_lake, new_lake);
-
-
-	fail("not ready\n");
+	laketype *old_l = &lake[lake_id(old_lake)];
+	laketype *l = &lake[new_lake];
+	//Merge the priority queue, it holds the old lake's coastline.
+	tiletype **old_pq = old_l->priq;
+	int cnt = old_l->priq_len;
+	while (cnt--) addto_priq(l, old_pq[cnt]);
+	//The old lake's outlet becomes a neighbour tile again:
+	addto_priq(l, old_outlet);
+	old_outlet->lake_ix = new_lake;
+	//Disable the old lake
+	old_l->merged_into = new_lake;
 }
 /*
 // ./tergen lakes 13 2 100 200 34 29
@@ -2200,7 +2243,7 @@ printf("search for drain...\n");
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tnn = &tile[nx][ny]; //tnn: tile neighbour's neighbour...
-printf("n=%i ",n);
+printf("n=%i (%c)",n,tnn->terrain);
 			if (lookup_lake_ix(tnn) == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
 			short nnheight = (tnn->terrain == '+') ? lake[lookup_lake_ix(tnn)].height : tnn->height;
@@ -2276,7 +2319,11 @@ printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_me
 			if (lookup_lake_ix(tn) == lake_ix) continue; //Skip already found tiles
 
 			//Higher tiles go on the priority queue. Neighbour lakes gets merged.
-			if (tn->terrain == '+') merge_lakes(lookup_lake_ix(tn), lake_ix); else {
+			if (tn->terrain == '+') {
+				int old_lake = lookup_lake_ix(tn);
+				tiletype *old_outlet = &tile[lake[old_lake].outflow_x][lake[old_lake].outflow_y];
+				merge_lakes(old_lake, lake_ix, old_outlet); 
+			} else {
 				//Add the tile to the priority queue:
 if (tn->terrain == ':') printf("SEA neighbour???\n");
 				tn->lake_ix = lake_ix; //Also mark it
@@ -2393,6 +2440,7 @@ printf("hit a lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,lookup_lake_ix
 				t = &tile[x][y];
 				from_height = l->height;
 printf("to outflow %3i,%3i height:%5i (%c)\n", x,y,t->height,t->terrain);
+printf("lake river serial: %i   merged into:%i\n", l->river_serial,l->merged_into);
 			}
 		} while (t->terrain != ':');
 printf("reached sea\n");
