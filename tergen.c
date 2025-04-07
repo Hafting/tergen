@@ -271,7 +271,7 @@ typedef struct {
 	char plate;   //id of tectonic plate this tile belongs to
 	char mark; //for depth-first search, volcano calculations etc.
 	char river; //for river assignment during map output
-	char lake_ix; //If tile is a lake '+', index into lake table
+	short lake_ix; //If tile is a lake '+', index into lake table
 	char lowestneigh; //direction of lowest neighbour
 	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
 	char temperature; //in celsius
@@ -324,11 +324,11 @@ typedef struct {
 	short height;           //Lake height above terrain reference zero height.
 	int priq_len;						//# of entries in priority queue
 	tiletype **priq;        //priority queue (array heap), tile pointers
-	int merged_into;        //-1, or id of lake it merged into. Subject to path compression
+	short merged_into;        //-1, or id of lake it merged into. Subject to path compression
 } laketype;
 
-#define MAX_LAKES 127
-#define MAX_PRIQ 20000
+#define MAX_LAKES 5000
+#define MAX_PRIQ 100000
 
 //Globals
 int mapx, mapy; //Map dimensions
@@ -1726,66 +1726,6 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
 	tile[x][y].steepness = (heightdiff <= 0) ? 0 : 1+log2(heightdiff);
 }
 
-/*
-	Called when a river gets stuck in a hole. It is known that all neighbours
-	have higher elevation – and the suggested way out is higher than
-	where the water came in from.
-	Check if there is a neighbour of a neighbour that is sea or lower elevation
-  than x,y.  If so, set newx,newy to the near neighbour, and flatten the near
-  neighbour	so the river may escape that way.
-	Return true on success, false on failure.
-	NO LONGER USED, we have big lakes now.
-*/
-bool river_dambreak(int x, int y, short below, tiletype tile[mapx][mapy], int *newx, int *newy, short seaheight) {
-	short maxheight = below - 2; // "-2" avoids loops, allow only strictly lower tiles
-	int mmx, mmy;
-	neighbourtype *nb0 = (y & 1) ? nodd[topo] : nevn[topo];
-	char newneighbour;
-	char n_inc = (topo < 2) ? 2 : 1;
-	for (char n = 0; n < neighbours[topo]; n += n_inc) {
-		int nx = wrap(x + nb0[n].dx, mapx);
-		int ny = wrap(y + nb0[n].dy, mapy);
-		neighbourtype *nb1 = (ny & 1) ? nodd[topo] : nevn[topo];
-		for (char m = 0; m < neighbours[topo]; m += n_inc) {
-			int mx = wrap(nx + nb1[m].dx, mapx);
-			int my = wrap(ny + nb1[m].dy, mapy);
-			if (mx == x && my == y) continue;
-			//Find the lowest neighbour of near neigbour.
-			//But not (x,y) !
-			//There may be more than one near neighbour, prefer
-			//flattening the lowest one.
-			if (tile[mx][my].height < maxheight || 
-					(tile[mx][my].height == maxheight && tile[nx][ny].height < tile[*newx][*newy].height)) {
-				maxheight = tile[mx][my].height;
-				*newx = nx;
-				*newy = ny;
-				mmx = mx;
-				mmy = my;
-				newneighbour = n;
-			}
-		}
-	}
-	if (maxheight == below - 2) return false; //Found no way out.
-	//Break the dam
-//	short newheight = (tile[x][y].height + tile[mmx][mmy].height) / 2;
-	short newheight = (below + tile[mmx][mmy].height) / 2;
-	int rocks = tile[*newx][*newy].height - newheight;
-
-	tile[*newx][*newy].height = newheight;
-	tile[*newx][*newy].rocks += rocks;
-
-	//Heightmap was changed by breaking a dam. Re-run find_next_rivertile on the neighbourhood.
-	nb0 = (*newy & 1) ? nodd[topo] : nevn[topo];
-	for (char n = 0; n < neighbours[topo]; n += n_inc) {
-		int nx = wrap(*newx + nb0[n].dx, mapx);
-		int ny = wrap(*newy + nb0[n].dy, mapy);
-		find_next_rivertile(nx, ny, tile, seaheight);
-	}
-
-
-	tile[x][y].lowestneigh = newneighbour;
-	return true;
-}
 
 void asteroid_strike(tiletype tile[mapx][mapy]) {
 	int x = random() % mapx;
@@ -1816,166 +1756,6 @@ void asteroid_strike(tiletype tile[mapx][mapy]) {
 	}
 }
 
-/*
-Running rivers:
-Sort tiles on height. Already done when sealevel was calculated, "tp" has tile pointers sorted on height.
-
-Iterate through land tiles (prep):
-  recover x,y from tile pointer
-  "wetness" is accumulated rainfall. use find_next_rivertile() to set steepness. Calculate waterflow originating here based on wetness and steepness. Reset marks. Unmarked means this tile has not yet flowed to sea.
-
-Iterate through land tiles again, highest to lowest.
-  marked tile, or no water to move? Skip to the next tile
-  recover x,y from tile pointer
-  Have movable water, it must now move to the sea (or a dead sea lake):
-  from_height = 20000
-  do {  //river loop
-		accumulate movable water from this tile
-	  accumulate eroded rocks from this tile
-		if next tile is higher, create a lake here
-    if this is a lake:
-		   drop most rocks. But fill no more than to min(from_height-1, or next tile height+1)
-			 if filled to next tile height+1, change the lake back to terrain. It filled up with rocks.
-	  if (next tile height < from_height) {
-			drop some rocks depending on steepness. Fill no more than to from_height-1
-		} else {
-			Next tile is higher than the lake inlet :-(
-			Attempt a dam break: Find lowest of neighbours of neighbours. If lower than from_height {
-			  Break the dam, by lowering the neighbour to between from_height-1 and second neighbour height+1
-				accumulate the height difference as a large amount of rocks
-				set the this tile's next tile to be that neighbour.
-			} else {
-			   Give up, this is now the dead sea!
-				 Future approach: flood fill the landscape, create BIG lakes until some outlet is found.
-			}
-			from_height = max(this heigh, next tile height)
-			tile = next ; and go on with the river loop
-		}
-  } while !sea
-*/
-
-/*
-Various problems with erosion. 
-1. Terrain changes during the round, a cached next rivertile could be wrong.
-2. Water may get to the sea, but terrain is changed so the rivers are left discontinous.
-   Next round may fix that, but there may not be a next round.
-
-solution: 
- * Each round leaves a consistent river system, suitable for outputting a terrain file
- * The round leaves data like "this much waterflow, this much erosion, this many rocks
-   to deposit.  But no actual terrain change during river running.
-	 So at the end of a round, a consistent terrain is there.
- * Accumulated changes (mountain eroded to lower height, gravel deposited...) are done
-   immediately before running rivers. A possibly broken terrain is created, and fixed during river running.
-
-Order of operations:
-1. plate tectonics, may raise mountain ranges and create rifts. Also, rare asteroid strikes, plate edge vulcanism
-2. Apply deferred height map changes. Erosion makes tiles lower, deposits make the tiles higher,
-   may plug lakes, may turn shallow sea to land. Some of the scattered rocks merge into terrain as sediments.
-	 Erosion planned in last round's step 7, lowers terrain and becomes loose rocks.
-	 
-	 All lakes replaced with maximally wet land (may or may not
-	 become a lake during the next river run.)
-
-3. Recompute the sea level
-4. Weather simulation, with evaporation, cloud transport and rain.
-5. Run rivers. Find each tile's "next" river tile. Make lakes – big or small when necessary. No height changes.
-   This establishes the waterflow from/through each tile, possibly a sum of many small flows.
-	 Assume some flooding in flat landscapes; a large river will wet a flat tile to some extent.
-	 A river from the mountains may go through a desert, occationally making grassland.
-6. Mass transport.  Rocks from previous rounds of erosion moves, if there is sufficient steepness and waterflow.
-   Again, assume some flooding in flat landscapes. This leaves some rocks, even if the waterflow is capable
-	 of carrying them. A steep landscape may set lots of
-	 rocks moving. If this flow reaches a flatter calmer landscape, excess rocks may stop. Rocks reaching a lake mostly stop
-	 Rocks reaching a sea tile: drop many, scatter the rest to neighbouring sea tiles, if any.
-	 Mass transport also establish a rock flow through each tile.
-7. Erosion. Waterflow, rock flow and steepness cause erosion from movement. Low temperature+steepness cause
-   erosion as water freeze and crack mountain surfaces. Glaciers may cause their own kind of erosion.
-
-
-
-Ice ages/glaciers:
-Water in frozen landscapes moves as glaciers instead. Very little wetness runs off in a slow flow, most of it accumulates in
-an ice sheet. (tile->wetness interpreted as ice thickness) All rocks are transported, no limit to capacity, but they move
-only one tile each round.  
-
-Mountains higher than the ice thickness see little erosion. (height difference to next tile exceed ice thickness.) In flat landscapes, the erosion is much stronger.
-
-Ice age:  Different temperature map, freezing much more of the world. Sea level lowered, as water is tied up in ice. Lots of erosion and gravel production.
-As the ice age ends, temperatures normalize. Wetness starts running off as water, the sea reaches normal levels. Hopefully, we get a landscape with fjords and u-shaped valleys...
-
-	 */
-
-/*
-BIG lake system (instead of dambreaks that may fail)
-
-laketype {
-	int tiles; //# of tiles in the lake
-  short height; //Height of water, same as height of outlet
-	int out_x, out_y; //coordinates of outlet tile
-
-}
-
-Each tile get a "lake number". if nonzero, it refers to some lake. water transfers to the outlet tile and flows from there.
-
-A river runs from a mountaintop. At some point, the exit tile is higher:
-1.the problem tile becomes the current lake tile:
-2.set lake height to tile height. Add the tile to the lake
-3.iterate through the tiles neighbours.
-  Skip any that are already in the lake, or in the priority queue (use an efficient check, i.e. O(1)
-	a.add tiles higher than the lake to the priority queue / heap
-	b.if any tile LOWER than the lake, use this tile as the lakes outflow
-	  tile, and set the lowest outside tile as the next rivertile.
-		Lake processing finishes at this point, the river keeps flowing.
-	c.No low tile: pick the lowest tile from the heap.
-	  make this tile current and goto (2)
-
-This procedure establishes a lake of any size, by floodfilling 
-the terrain till an exit is found. 
-
-When water enter a tile, check if it is a lake. If so, transfer to
-the exit tile and go on from there.
-
-Similar for rock flow. When entering a lake, drop the rocks and 
-end the rockflow right there.
-
-As water go on, a bigger lake might form. What if it rises to engulf
-other lakes? (Through the outflow tile, or other border tiles of the same height)
-
-We cannot simply let the lake terrain fill again from the other side. This could
-lead to an infinite loop, where water repeatedly flow back and forth filling two lakes.
-
-So. When a lake want to spill over an edge and there is a lake on the other side:
-- if the lake on the other side is lower, fine. Let waterflow enter that lake and
-  proceed to its exit which was found in an earlier run_rivers() this round.
-
-- the lake on the other side cannot be higher. If it was higher, that edge
-  tile would be submerged!
-
-- The other lake may have the same height, which could happen is a flat landscape.
-  If the other lake is from an earlier run_rivers() this round, we can use it.
-	Let water flow to its exit as usual.
-
-- If the other lake is the same height and created earlier in this run_rivers(),
-  we have a problem. We cannot use its exit, because that exit has filled the
-	lake we are now processing.
-
-	The lakes must merge, and will likely also have to rise to find a new common
-	outflow. (MAY not need to rise, if another same-height tile can be used for outflow.)
-
-Lake merging:
-A. Track down every tile of the other lake. (They are connected, so a DFS ought to be
-   much faster than searching the entire map.)  Move them to THIS lake. Add all such tiles
-	 neighbours to the priqueue, unless they are there already or are lake. Except for the
-	 lakes's outflow tile, none have a lower neighbour not inside the lake.
-	 End with selecting the other lakes old outflow tile, and process it at point 3 above. This
-	 because a tile have many neighbours. The first outflow led to a dead end and this
-	 lake merger. There may be another way out that works. If not, the priority queue
-	 will find the next place to grow the lake. Eventually, an outflow to the sea will
-	 be found.
-
-	 */
-
 int lakes;
 laketype lake[MAX_LAKES];
 tiletype *priq[MAX_PRIQ];
@@ -1983,7 +1763,6 @@ tiletype *priq[MAX_PRIQ];
 //Add to a priority queue/heap
 void addto_priq(laketype *l, tiletype *t) {
 	if (l->priq - priq + l->priq_len == MAX_PRIQ) fail("Ran out of space for priority queues. Recompile with higher MAX_PRIQ\n");
-printf("adding height %i to priq\n", t->height);
 	l->priq[l->priq_len] = t;
 
 	//Push the new entry up the heap, if necessary
@@ -2021,7 +1800,6 @@ tiletype *minfrom_priq(laketype *l) {
 		}
 		i = child;
 	} while (i < l->priq_len);
-printf("minfrom() returning height %i\n", ret->height);
 	return ret;
 }
 
@@ -2043,36 +1821,6 @@ int lookup_lake_ix(tiletype *t) {
 	return t->lake_ix;
 }
 
-/*
-Of course, lake merging turned up more bugs.
-Got this loop:
-do:tile:  27, 76    height: 2293   (m)mountain  
-do:tile:  27, 75    height: 2293   (+)hit a lake, pos: 27, 75 ix=  124, at lake height  2293  to outflow  27, 77 height: 2293 (m)
-do:tile:  27, 77    height: 2293   (m)mountain  
-do:tile:  27, 79    height: 2293   (+)hit a lake, pos: 27, 79 ix=   69, at lake height  2293  to outflow  27, 76 height: 2293 (m)
-Two lakes flowing into each other :-(
-
-And - 2293 is sea height. 
-
-Lake 124 creation:
- lake tile at 27,75  surrounded
- neighbour tile at 27,77 becomes a drain tile. It neighbours lake 69 which has a different exit tile. So drain
- into lake 69 pos 27,79    All this seems ok.
-
- The older lake 69 has successful outflow at 27,76. but from 27,76 we get to 27,75 which is lake 124. (loop)
- WHY?  Lake 69 was successful earlier. Why then, was it necessary to mk_lake at 27,79 now?
- Failure to notice a sea tile??? Yep. The sea tile is not necessarily LOWER. :-(
-
-Simplification: Ensure that all sea tiles are LOWER than all land tiles. Simplifies things, even if the
-land to sea ratio won't be perfect. sealevel() does the partitioning.
-
-Now, this solved some problems!  Sea is always lower than land, so no longer a need to search 
-specifically for sea tiles. They will always be found because they are lower.
-
-But still problems. A world with 80% land (or even 35%) expect more/larger lakes. But they hang:
-
-
-	 */
 
 /*
   Lake merge process:
@@ -2087,7 +1835,6 @@ But still problems. A world with 80% land (or even 35%) expect more/larger lakes
 	 */
 
 void merge_lakes(int old_lake, int new_lake, tiletype *old_outlet) {
-	printf("merge lakes(), merging lake %i into lake %i\n", old_lake, new_lake);
 	laketype *old_l = &lake[lake_id(old_lake)];
 	laketype *l = &lake[new_lake];
 	//Merge the priority queue, it holds the old lake's coastline.
@@ -2100,100 +1847,7 @@ void merge_lakes(int old_lake, int new_lake, tiletype *old_outlet) {
 	//Disable the old lake
 	old_l->merged_into = new_lake;
 }
-/*
-// ./tergen lakes 13 2 100 200 34 29
-//bug, gets a lake at 59,182 with outflow to 59,181 which flow directly into the lake again. Should not happen.
-//
-//makes one lake. the lake output reaches the sea.
-//makes sec lake, reaches sea
-//      3rd lake, sea
-//      4th lake, sea
-        5, sea
-				6, sea
-				7, sea
-				8, sea outf 7,177 27 tiles
 
-Gets a 1-tile lake where the ourtflow tile flows back into the lake. But immediately before that:
-DBG: lake reached other lake!
-
-So:
-  start lake 16 on  60,182, height 2283
-	possible drain on 59,181, height 2285 lake raised to 2285
-	drain into lake 15, height 2285, on ?    lake 15 has different river serial, SHOULD be ok
-
-	mk_lake ends
-	water to 59,181 (outflow tile).
-	water proceeds to 69,182 which is lake 15. But lake 15 also has outflow tile 59,181 - loop
-
-	two lakes MAY share an outflow tile. But then, the out-tile must not flow into the other lake!
-
-	Why was not the working outflow kept ???
-
-	* fix: use nnheight instead of mistakenly using tnn->height (which discards the lakeheight above)
-
-But still failures:
-	Now, makes a 3-tile lake with outflow tile 74,154 (has different river_serial lake as neighbour)
-	uses 74,154 as outflow, further flow into that lake.
-
-	The lake completes. River flow resumes at 74,154 as it should. But straight to
-	mk_lake(74,154)  WHY.  Don't make a lake on the outlet, when we know the outlet IS a feasible
-	outlet.
-
-	run_rivers unwilling to flow to same height, even though it is a lake?
-
-	* fixed that.
-
-But, still failures:
-	minfrom() returning height 2274
-	impossible, tile lower than lake?
-
-	Here, tiles WITH lake was added as lake neighbours. That should not happen. Of course they
-	were lower, tile height only goes up to the lake bottom.
-
-  * fixed that too.
-
-	Other bug:
-	./tergen lakes 13 1 40 60 4255555 29
-
-  Now:
-	./tergen lakes 13 1 40 60 425 29
-	
-  Minor bugs: many lakes in the arctic. They should freeze
-	            loops im mk_lake should use step=2 for some topologies. See loops in run_river and fixups
-							- early attempt lead to bugs, postponed.
-
-  Major bug: a lake touching the ocean. why? All ocean tiles are lower than land, a lake should not
-             spread to the ocean edge. Did the sealevel change after last river run?
-						 FOUND. output() runs sealevel a last time. Needs fixing: no erosion or deposits the last round
-             - attempted fix by "no height change in last round". Helped, but did not fix.
-						 - second fix, explicitly allow exit to sea tile of the same height. Helped, but did not fix
-
-             supremely annoying - WHY lake+sea?
-
-						 disabled dfs_lake(). Actually fixed some cases, do we have stray tile->mark again?
-						                      But did not fix ALL cases :-(
-						 fix: seatiles->lake_ix = -1.  No lakes in the sea!
-
-						 fix: reset tile mark when islands are drowned in fixups.
-						 Finally, no lakes in the sea.
-
-
-						 Next problem: changing the neighbour ORDER in mk_lake
-						 should have no effect on correctness, although
-						 lakes may grow slightly different (when there is choice.)
-
-						 Sadly, this leads to inf.loops again.
-						 Making lake 10 serial 1884, outflow to lake 2 serial 2191
-						 made single tile lake 10, outflow to 14,27
-             run_rivers:
-						 tile 14,27 height 2259 (m)
-						 tile 14,25 height 2259 (+) hit lake 2 [as expected]
-						            outflow to 14,27  - which of course loops forever
-
-             WHY was not the orgiginal next rivertile for 14,27 kept then? mk_lake is making a mistake here?
-						 Fixed that too.
-
-*/
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
 	printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
@@ -2224,7 +1878,6 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		l->tiles++;
 		t->terrain = '+';
 		t->lake_ix = lake_ix;
-printf("mk_lake tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", x,y,t->height,l->height);
 		//Iterate through tile neighbours, in search of a drain.
 		//looking for a lower tile (or lower lake/sea)
 		//Find the best/lowest of possibly several outlets. Or none.
@@ -2234,30 +1887,16 @@ printf("mk_lake tile loop. x=%3i  y=%3i   tile height:%5i    lake height:%i\n", 
 		int best_x = -1, best_y = -1;
 		short best_h = l->height;
 		int best_n = -1;
-printf("search for drain...\n");
 		int lakes_to_merge = 0; //We may find one. Or in rare cases, two.
 		int n_inc = (topo < 2) ? 2 : 1; //No diagonal rivers in square topologies
-//		for (int n = neighbours[topo]; n--;) {
-		printf("lowest neighbour before drain search: %i\n", t->lowestneigh);
 		for (int n = 0; n < neighbours[topo]; n += n_inc) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tnn = &tile[nx][ny]; //tnn: tile neighbour's neighbour...
-printf("n=%i (%c)",n,tnn->terrain);
 			if (lookup_lake_ix(tnn) == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
 			short nnheight = (tnn->terrain == '+') ? lake[lookup_lake_ix(tnn)].height : tnn->height;
-printf("nnheight=%i  ",nnheight);
 			if ( (nnheight > l->height) || (nnheight > best_h)) continue; //Skip useless
-printf("not useless\n");
-			if ((tnn->terrain == '+') && (lookup_lake_ix(tnn) != lake_ix)) {
-				printf("DBG: lake reached other lake!\n");
-				printf("this ix:     %5i other ix:     %5i\n",lake_ix,lookup_lake_ix(tnn));
-				printf("this height: %5i other height: %5i  other tile height: %5i\n", l->height, lake[lookup_lake_ix(tnn)].height, tnn->height);
-				printf("this rserial:%5i other rserial:%5i\n", l->river_serial, lake[lookup_lake_ix(tnn)].river_serial);
-				printf("laketile is neighbour number:  %5i\n",n);
-				//not necessarily a problem. But this case precedes many a bug...
-			}
 			//The neighbour is <= lake height AND <= best_h
 			//always select < best_h, no further questions
 
@@ -2300,7 +1939,6 @@ printf("not useless\n");
 				t->lowestneigh = best_n; //original might be different.
 				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
 				l->tiles--;
-printf("mk_lake() done. ix=%i outflow tile %3i,%3i. Lake tiles:%i  (flow neighbour:%i)\n",lake_ix,x,y,l->tiles,best_n);
 				return;
 			}
 		}
@@ -2308,10 +1946,8 @@ printf("mk_lake() done. ix=%i outflow tile %3i,%3i. Lake tiles:%i  (flow neighbo
 		//No drain was found, so this tile will be part of the lake.
 		//If any neighbours were other lakes, they must merge during the next scan:
 
-printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_merge);
 		//No outlet yet. Scan neighbours again, add to the priority queue.
 		//Then pick the lowest tile t from the priority queue, and keep going.
-//		for (int n = neighbours[topo]; n--;) {
 		for (int n = 0; n < neighbours[topo]; n += n_inc) {
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
@@ -2322,12 +1958,10 @@ printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_me
 			if (tn->terrain == '+') {
 				int old_lake = lookup_lake_ix(tn);
 				tiletype *old_outlet = &tile[lake[old_lake].outflow_x][lake[old_lake].outflow_y];
-				merge_lakes(old_lake, lake_ix, old_outlet); 
+				merge_lakes(old_lake, lake_ix, old_outlet);
 			} else {
 				//Add the tile to the priority queue:
-if (tn->terrain == ':') printf("SEA neighbour???\n");
 				tn->lake_ix = lake_ix; //Also mark it
-printf("addto_priq()...\n");
 				addto_priq(l, tn);
 			}
 		}
@@ -2376,7 +2010,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		if (t->mark || !t->waterflow) continue;
 		int x, y;
 		recover_xy(tile, t, &x, &y);
-printf("run_rivers() start from %i,%i  height:%i   (sea:%i)\n",x,y,t->height,seaheight);
 		short from_height = 20000; //Height the water came in from. Sky, or previous tile.
 		int flow = 0;
 		do {
@@ -2386,7 +2019,6 @@ printf("run_rivers() start from %i,%i  height:%i   (sea:%i)\n",x,y,t->height,sea
 				flow -= floodwater;
 				t->wetness += floodwater;
 			}
-printf("do:tile: %3i,%3i    height:%5i   (%c)", x,y,t->height,t->terrain);
 			//Accumulate waterflow through the tile
 			t->waterflow += flow;
 			if (!t->mark) {
@@ -2406,7 +2038,6 @@ printf("do:tile: %3i,%3i    height:%5i   (%c)", x,y,t->height,t->terrain);
 			}
 
 			if (t->terrain == 'm') {
-printf("mountain  ");
 				//Look up the next tile
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 				int nx = wrap(x + nb[t->lowestneigh].dx, mapx);
@@ -2422,7 +2053,6 @@ printf("mountain  ");
 					y = l->outflow_y;
 					t = &tile[x][y];
 					from_height = l->height;
-printf("made lake, transfer to outflow %3i,%3i height:%i", x,y,t->height);
 				} else {
 					//River proceeds downhill
 					from_height = t->height;
@@ -2430,20 +2060,15 @@ printf("made lake, transfer to outflow %3i,%3i height:%i", x,y,t->height);
 					t = next;
 					x = nx; y = ny;
 				}
-printf("\n");
 			} else if (t->terrain == '+') {
 				//The river ran into a lake. Transfer flow to the lake exit:
 				laketype *l = &lake[lookup_lake_ix(t)];
-printf("hit a lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,lookup_lake_ix(t),l->height);
 				x = l->outflow_x;
 				y = l->outflow_y;
 				t = &tile[x][y];
 				from_height = l->height;
-printf("to outflow %3i,%3i height:%5i (%c)\n", x,y,t->height,t->terrain);
-printf("lake river serial: %i   merged into:%i\n", l->river_serial,l->merged_into);
 			}
 		} while (t->terrain != ':');
-printf("reached sea\n");
 	}
 }
 
@@ -2462,7 +2087,6 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 		//Pick up rocks:
 		int rocks = t->rocks;
 		t->rocks = 0;
-//if (rocks < 0) printf("A rocks=%i ?\n",rocks); //WHY negative?
 		int x, y;
 		recover_xy(tile, t, &x, &y);
 		while (rocks && t->terrain != ':' && t->terrain != '+') {
