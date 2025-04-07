@@ -324,6 +324,7 @@ typedef struct {
 	short height;           //Lake height above terrain reference zero height.
 	int priq_len;						//# of entries in priority queue
 	tiletype **priq;        //priority queue (array heap), tile pointers
+	int merged_into;        //-1, or id of lake it merged into. Subject to path compression
 } laketype;
 
 #define MAX_LAKES 127
@@ -2020,9 +2021,41 @@ printf("minfrom() returning height %i\n", ret->height);
 	return ret;
 }
 
-void merge_lakes() {
-	printf("no can do - not implemented yet\n");
-	fail("lake merging not implemented\n");
+//Lookup function for a lake's lake id. The lake may be merged into a second lake,
+//which may be merged into a third, and so on. Resolve this, and use
+//path compression for speeding up future lookups
+int lake_id(int lake_number) {
+	laketype *l = &lake[lake_number];
+	if (l->merged_into == -1) return lake_number;
+	l->merged_into = lake_id(l->merged_into);
+	return l->merged_into;
+}
+
+//Lookup function for a tile's lake ix.
+//automatically corrects lake_ix if the lake was merged earlier.
+//Must be used instead of accessing tiletype->lake_ix directly, except for lake_merge()
+int lookup_lake_ix(tiletype *t) {
+	if (t->lake_ix != -1) t->lake_ix = lake_id(t->lake_ix);
+	return t->lake_ix;
+}
+
+/*
+  Lake merge process:
+	* old lake merges into the new lake that is eating it
+	* the old lake's priq tiles are added to the new priq, unless already discovered
+	  - ensures that all lake neighbourhood tiles are on the priq
+	* the old lake's outlet must be added to the new priq too
+	* lake tiles is not added immediately. This is deferred to lake_ix lookup time, for efficiency
+	  - a lake_ix() lookup function is needed, instead of using ->lake_ix directly
+		- laketype needs a field specifying what lake it has been merged into
+		- path compression is used on looking up this field.
+	 */
+
+void merge_lakes(int old_lake, int new_lake) {
+	printf("merge lakes(), merging lake %i into lake %i\n", old_lake, new_lake);
+
+
+	fail("not ready\n");
 }
 /*
 // ./tergen lakes 13 2 100 200 34 29
@@ -2130,6 +2163,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 	l->river_serial = river_serial;
 	l->height = -32768; //So the first tile WILL be higher
 	l->priq_len = 0;
+	l->merged_into = -1;
 	laketype *prev = &lake[lake_ix-1];
 	l->priq = lake_ix ? prev->priq + prev->priq_len : priq;
 	tiletype *t = &tile[x][y];
@@ -2167,17 +2201,17 @@ printf("search for drain...\n");
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tnn = &tile[nx][ny]; //tnn: tile neighbour's neighbour...
 printf("n=%i ",n);
-			if (tnn->lake_ix == lake_ix) continue; //Skip already found tiles
+			if (lookup_lake_ix(tnn) == lake_ix) continue; //Skip already found tiles
 			//Heigh of neighbour tile, or any lake on it:
-			short nnheight = (tnn->terrain == '+') ? lake[tnn->lake_ix].height : tnn->height;
+			short nnheight = (tnn->terrain == '+') ? lake[lookup_lake_ix(tnn)].height : tnn->height;
 printf("nnheight=%i  ",nnheight);
 			if ( (nnheight > l->height) || (nnheight > best_h)) continue; //Skip useless
 printf("not useless\n");
-			if ((tnn->terrain == '+') && (tnn->lake_ix != lake_ix)) {
+			if ((tnn->terrain == '+') && (lookup_lake_ix(tnn) != lake_ix)) {
 				printf("DBG: lake reached other lake!\n");
-				printf("this ix:     %5i other ix:     %5i\n",lake_ix,tnn->lake_ix);
-				printf("this height: %5i other height: %5i  other tile height: %5i\n", l->height, lake[tnn->lake_ix].height, tnn->height);
-				printf("this rserial:%5i other rserial:%5i\n", l->river_serial, lake[tnn->lake_ix].river_serial);
+				printf("this ix:     %5i other ix:     %5i\n",lake_ix,lookup_lake_ix(tnn));
+				printf("this height: %5i other height: %5i  other tile height: %5i\n", l->height, lake[lookup_lake_ix(tnn)].height, tnn->height);
+				printf("this rserial:%5i other rserial:%5i\n", l->river_serial, lake[lookup_lake_ix(tnn)].river_serial);
 				printf("laketile is neighbour number:  %5i\n",n);
 				//not necessarily a problem. But this case precedes many a bug...
 			}
@@ -2198,16 +2232,16 @@ printf("not useless\n");
 			//Some land tiles and some sea tiles may have the same height. So test for sea tiles.
 
 
-			if ( (nnheight < best_h) || (tnn->terrain == ':') || ( (tnn->terrain == '+') && (lake[tnn->lake_ix].river_serial != river_serial)) ) {
+			if ( (nnheight < best_h) || (tnn->terrain == ':') || ( (tnn->terrain == '+') && (lake[lookup_lake_ix(tnn)].river_serial != river_serial)) ) {
 				//Found a possible outlet!
 				//But keep looking, the tile might have an even lower neighbour.
 				best_h = nnheight;
 				best_x = nx;
 				best_y = ny;
-				if ( tnn->terrain == '+' && lake[tnn->lake_ix].river_serial != river_serial && lake[tnn->lake_ix].outflow_x == x && lake[tnn->lake_ix].outflow_y == y ) best_n = t->lowestneigh; //Other lake drains here, so NO CHANGE
+				if ( tnn->terrain == '+' && lake[lookup_lake_ix(tnn)].river_serial != river_serial && lake[lookup_lake_ix(tnn)].outflow_x == x && lake[lookup_lake_ix(tnn)].outflow_y == y ) best_n = t->lowestneigh; //Other lake drains here, so NO CHANGE
 				else best_n = n; //Normal case
 
-			} else lakes_to_merge += (tnn->terrain == '+' && (lake[tnn->lake_ix].river_serial == river_serial));
+			} else lakes_to_merge += (tnn->terrain == '+' && (lake[lookup_lake_ix(tnn)].river_serial == river_serial));
 		} //drain search
 
 		//Did we find an outlet?  If so, set up its use and return.
@@ -2215,7 +2249,7 @@ printf("not useless\n");
 		//worse: in theory, there could be several lakes to merge!
 		if (best_n != -1) { //Found something
 			tiletype *tn = &tile[best_x][best_y];
-			if ( (best_h == t->height) && (lake[tn->lake_ix].river_serial == river_serial) ) merge_lakes();//can't happen now
+			if ( (best_h == t->height) && (lake[lookup_lake_ix(tn)].river_serial == river_serial) ) fail("shouldn't get here!\n");//can't happen now
 			else {
 				//What we found, was a useable outlet. So, use it.
 				l->outflow_x = x;
@@ -2239,10 +2273,10 @@ printf("search for lake tile shore neighbours. %i lakes to merge\n", lakes_to_me
 			int nx = wrap(x+nb[n].dx, mapx);
 			int ny = wrap(y+nb[n].dy, mapy);
 			tiletype *tn = &tile[nx][ny];
-			if (tn->lake_ix == lake_ix) continue; //Skip already found tiles
+			if (lookup_lake_ix(tn) == lake_ix) continue; //Skip already found tiles
 
 			//Higher tiles go on the priority queue. Neighbour lakes gets merged.
-			if (tn->terrain == '+') merge_lakes(); else {
+			if (tn->terrain == '+') merge_lakes(lookup_lake_ix(tn), lake_ix); else {
 				//Add the tile to the priority queue:
 if (tn->terrain == ':') printf("SEA neighbour???\n");
 				tn->lake_ix = lake_ix; //Also mark it
@@ -2336,7 +2370,7 @@ printf("mountain  ");
 				//exception: flowing to the same height is ok, if it is a lake/sea
 				if ( (next->height > t->height) || (next->height == t->height && next->terrain == 'm') ) {
 					mk_lake(x, y, tile, i);
-					laketype *l = &lake[t->lake_ix];
+					laketype *l = &lake[lookup_lake_ix(t)];
 					x = l->outflow_x;
 					y = l->outflow_y;
 					t = &tile[x][y];
@@ -2352,8 +2386,8 @@ printf("made lake, transfer to outflow %3i,%3i height:%i", x,y,t->height);
 printf("\n");
 			} else if (t->terrain == '+') {
 				//The river ran into a lake. Transfer flow to the lake exit:
-				laketype *l = &lake[t->lake_ix];
-printf("hit a lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,t->lake_ix,l->height);
+				laketype *l = &lake[lookup_lake_ix(t)];
+printf("hit a lake, pos:%3i,%3i ix=%5i, at lake height %5i  ",x,y,lookup_lake_ix(t),l->height);
 				x = l->outflow_x;
 				y = l->outflow_y;
 				t = &tile[x][y];
