@@ -266,7 +266,8 @@ void my_sincosf(float x, float *sinx, float *cosx) {
 
 
 typedef struct {
-	short height; //Meters above lowest sea bottom. Range 0–10000
+	short height; //Meters above lowest. Range 0–10000
+	short sediments; //This amount of the height is soft sediments. The rest is harder rock.
 	char terrain; //Freeciv terrain letter
 	char plate;   //id of tectonic plate this tile belongs to
 	char mark; //for depth-first search, volcano calculations etc.
@@ -2247,6 +2248,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			heightsum += tile[wrap(x+neigh->dx,mapx)][wrap(y+neigh->dy,mapy)].rocks;
 		}
 		tile[x][y].height = heightsum / (neighbours[topo]+2); //rocks is not in use at this stage
+		short depth = 3700 - tile[x][y].height;
+		depth = (depth >= 0) ? depth : 0;        //Positive depth below 3700
+		tile[x][y].sediments = depth / 10;       //Low tiles get some sediments, high tiles don't.
 	}
 
 	//Number of rounds for tectonics & weather
@@ -2409,10 +2413,35 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				//Some loose rocks becomes sediments:
 				int rocks = t->rocks * sediment_percent / 100;
 				t->height += rocks;
+				t->sediments += rocks;
 				t->rocks -= rocks;
 				//Apply any deferred erosion, terrain becomes loose rocks:
-				t->height -= t->erosion;
-				t->rocks += t->erosion;
+				//Sediments erode 3x more than solid rock:
+
+
+				if (t->sediments >= 3 * t->erosion) {
+					//Erosion of sediments only
+					rocks = 3 * t->erosion;
+					t->sediments -= rocks;
+					t->height -= rocks;
+					t->rocks += rocks;
+				} else {
+					//Erosion of sediments
+					rocks = (t->sediments / 3);
+					t->erosion -= rocks;
+					rocks *= 3; // sediment / 3 * 3 avoids roundoff errors in sediments
+					t->sediments -= rocks;
+
+					//Remaining erosion of bedrock
+					rocks += t->erosion;
+
+					t->height -= rocks;
+					t->rocks += rocks;
+				}
+
+
+//				t->height -= t->erosion;
+//				t->rocks += t->erosion;
 				t->erosion = 0;
 			}
 		}
@@ -2565,7 +2594,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				//waterflow circumference. The circumference is proportional to
 				//the square root of the flow area.
 				if (t->terrain == 'm') {
-					t->erosion = (sqrtf(t->waterflow) * t->steepness * 4.5) / rounds; //Erosion from waterflow  5 better than 4?
+					//Erosion from waterflow. Used to be 4.5. Now, 2 for bedrock and 2*3 for sediments
+					t->erosion = (sqrtf(t->waterflow) * t->steepness * 2) / rounds;
 					t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
 
 					//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
