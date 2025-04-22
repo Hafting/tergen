@@ -964,7 +964,7 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "action_decision_size=3\n");
 	fprintf(f, "action_decision_vector=\"nothing\",\"passive\",\"active\"\n");
 	fprintf(f, "terrident={\"name\",\"identifier\"\n\"Inaccessible\",\"i\"\n\"Lake\",\"+\"\n\"Ocean\",\" \"\n\"Deep Ocean\",\":\"\n\"Glacier\",\"a\"\n\"Desert\",\"d\"\n\"Forest\",\"f\"\n\"Grassland\",\"g\"\n\"Hills\",\"h\"\n\"Jungle\",\"j\"\n\"Mountains\",\"m\"\n\"Plains\",\"p\"\n\"Swamp\",\"s\"\n\"Tundra\",\"t\"\n");
-	if (extended_terrain) fprintf(f, "\"Arctic hills\",\"A\"\n\"Desert hills\",\"D\"\n\"Forest hills\",\"F\"\n\"Jungle hills\",\"J\"\n\"Tundra hills\",\"T\"\n\"Volcanoes\",\"v\"\n");
+	if (extended_terrain) fprintf(f, "\"Arctic hills\",\"A\"\n\"Desert hills\",\"D\"\n\"Forest hills\",\"F\"\n\"Jungle hills\",\"J\"\n\"Tundra hills\",\"T\"\n\"Savanna\",\"S\"\n\"Volcanoes\",\"v\"\n");
 	fprintf(f, "}\n\n");
 
 	fprintf(f, "[game]\n");
@@ -1040,6 +1040,7 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 #define T_SEAICE -1
 #define T_GLACIER -6
 #define T_TUNDRA 2
+#define T_SAVANNA 20
 
 //Assign freeciv terrain types, and output a freeciv map
 /*
@@ -1253,11 +1254,13 @@ Terrain assignment for extended tile set:
 2. Sort the land on temperature. Sufficiently cold tiles become 
    arctic, arctic hill, tundra or tundra hill. No change to mountains.
 3. Sort remaining land on wetness. Divide it into
-   desert, plain, grass, forest, and swamp   (lowland)
-   desert,  hill,  hill, forest, forest      (hill terrain)
+   desert|savanna|plain, grass, forest, and swamp   (lowland)
+   d.hill   |      hill, hill,  f.hill, and f.hill  (hill terrain)
 4. Sort the forest part on temperature, the hotter part is jungle instead
 
 */
+#define d_to_S 0.1
+#define p_to_S 0.3
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
 
 	int i = mapx * mapy;
@@ -1271,6 +1274,12 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 	float d_part, p_part, g_part, f_part, j_part, s_part, partsum;
 	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
+	//Savanna terrain type 'S'. Hot and dry, but not as dry as desert.
+	//Grab some of the desert part, and some of the plain part. High tiles will still
+	//become desert hills or normal hills. Low tiles will become savanna if they are hot enough.
+	float savanna_part = (d_part * d_to_S + p_part * p_to_S);
+	d_part *= (1.0-d_to_S); //reduce d_part and p_part accordingly
+	p_part *= (1.0-p_to_S);
 
 	//Classify terrain by height, and sometimes temperature
 	int limit, j = 0;
@@ -1311,6 +1320,20 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 		set_tile(tp[j], 'd', 'D');
 		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
 	}
+
+#ifdef DBG
+	printf("Savanna tiles, possibly.\n");
+#endif
+	//First savanna/desert hill. Colder tiles: desert
+	for (limit += d_part*d_to_S/partsum*total; j < limit; ++j) {
+		set_tile(tp[j], (tp[j]->temperature > T_SAVANNA) ? 'S' : 'd', 'D');
+	}
+
+	//Second savanna/hill. Colder tiles: plains
+	for (limit += p_part*p_to_S/partsum*total; j < limit; ++j) {
+		set_tile(tp[j], (tp[j]->temperature > T_SAVANNA) ? 'S' : 'p', 'h');
+	}
+
 #ifdef DBG
 	printf("%i ph plain/hill tiles\n", (int)(p_part/partsum*total));
 #endif
