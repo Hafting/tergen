@@ -270,11 +270,11 @@ typedef struct {
 	short sediments; //This amount of the height is soft sediments. The rest is harder rock.
 	char terrain; //Freeciv terrain letter
 	char plate;   //id of tectonic plate this tile belongs to
-	char mark; //for depth-first search, volcano calculations etc.
-	char river; //for river assignment during map output
+	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
+	unsigned char river : 1; //for river assignment during map output
 	short lake_ix; //If tile is a lake '+', index into lake table
-	char lowestneigh; //direction of lowest neighbour
-	char steepness; //1+log2 of height difference to lowest neighbour. -1 if unset
+	unsigned char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5
+	char steepness : 5; //1+log2 of height difference to lowest neighbour. -1 if unset, max 14.
 	char temperature; //in celsius
 	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
 	int waterflow; //amount in rivers. Wetness running off, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
@@ -1986,16 +1986,15 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 		//worse: in theory, there could be several lakes to merge!
 		if (best_n != -1) { //Found something
 			tiletype *tn = &tile[best_x][best_y];
-			if ( (best_h == t->height) && (lake[lookup_lake_ix(tn)].river_serial == river_serial) ) fail("shouldn't get here!\n");//can't happen now
-			else {
-				//What we found, was a useable outlet. So, use it.
-				l->outflow_x = x;
-				l->outflow_y = y;
-				t->lowestneigh = best_n; //original might be different.
-				t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
-				l->tiles--;
-				return;
-			}
+
+			//What we found, was a useable outlet. So, use it.
+			l->outflow_x = x;
+			l->outflow_y = y;
+			t->lowestneigh = best_n; //original might be different.
+			t->terrain = 'm'; //The exit tile is a land tile with river on it, not a lake part.
+			l->tiles--;
+			return;
+
 		}
 
 		//No drain was found, so this tile will be part of the lake.
@@ -2086,12 +2085,6 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 			//Determine the next tile. For land tiles, t->lowestneigh
 			//For a lake tile, the lake outflow tile
 
-			//Dead end? (impossible)
-			if (t->lowestneigh == -1) {
-				fail("DEBUG: impossible lowestneigh\n");
-				break;
-			}
-
 			if (t->terrain == 'm') {
 				//Look up the next tile
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
@@ -2160,14 +2153,6 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 
 			//Remaining rocks move, add to rockflow:
 			t->rockflow += rocks;
-
-			//No next tile? (run_rivers() gave up here)
-			if (t->lowestneigh == -1) {
-				fail("impossible, no next rivertile? (rock flow)\n");
-				t->rocks += rocks;
-				rocks = 0;
-				break;
-			}
 
 			//Look up the next tile
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
