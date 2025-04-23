@@ -267,7 +267,10 @@ void my_sincosf(float x, float *sinx, float *cosx) {
 //sizeof(tyiletype) Needed 34, actually used 40. Squeezed down to 32
 
 typedef struct {
-	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
+	union {
+		int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
+		float relative_wetness; //Used when assigning freeciv terrain types
+	};
 	int waterflow; //amount in rivers. Wetness running off, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
 	int rocks; //erosion, rocks that may follow the rivers and become sediment
 	int erosion; //Erosion, deferred to the next round
@@ -566,6 +569,15 @@ int q_compare_wetness(void const *p1, void const *p2) {
 	tiletype const *tp1 = *(tiletype **)p1;
 	tiletype const *tp2 = *(tiletype **)p2;
 	return (int)tp1->wetness - (int)tp2->wetness;
+}
+
+//Comparison function for qsort, sort tiles by relative wetness
+int q_compare_relative_wetness(void const *p1, void const *p2) {
+	tiletype const *tp1 = *(tiletype **)p1;
+	tiletype const *tp2 = *(tiletype **)p2;
+	float cmp = tp1->relative_wetness - tp2->relative_wetness;
+	if (cmp == 0.0) return 0;
+	if (cmp > 0.0) return 1; else return -1;
 }
 
 //Comparison function for qsort, sort tiles by waterflow
@@ -1043,6 +1055,28 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 #define T_TUNDRA 2
 #define T_SAVANNA 20
 
+int airtemp(int height, int groundheight, int groundtemp) {
+	if (groundheight > 11000) return groundtemp; //No temperature fall above 11000
+  if (height > 11000) height = 11000;
+	int gdist = height - groundheight;
+	return groundtemp - 6.5 * gdist/1000;
+}
+
+//Temperature drops with 6.5 Celcius per km up from ground [wikipedia]
+//this goes on to 11km, then no further drop.
+//How much water may an airbox hold?
+//More with higher temperature (8% per celsius)
+//parameters are:
+//height of air above sea
+//height of ground below
+//ground temperature
+int cloudcapacity(int height, int groundheight, int groundtemp) {
+	int atemp = airtemp(height, groundheight, groundtemp);
+	//Capacity at 50 celsius is arbitrarily set to 50 000 "units" of water
+	return 50000 * powf(1.08, atemp-50);
+}
+
+
 //Assign freeciv terrain types, and output a freeciv map
 /*
 Terrain assignment for normal freeciv tileset:
@@ -1065,9 +1099,9 @@ It also affect the amount of desert and the forest/jungle allocation. 50 is norm
 
 "wateronland" gives twice the percentage of river tiles. Actual number will be lower, because rivers merge to prevent ugly "river on every tile in the grid". Wateronland also affect the desert/swamp balance, and p/g allocation. 50 is normal
 */
-void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
+void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9]) {
 	int i = mapx*mapy;
-	sealevel(tp, land, tile, weather); //Also sorts on height, and sets seatiles and landtiles
+	short seaheight = sealevel(tp, land, tile, weather); //Also sorts on height, and sets seatiles and landtiles
 	int shallowsea = seatiles/3;
 	int deepsea = seatiles - shallowsea;
 
@@ -1101,9 +1135,28 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 	for (; tp[j]->temperature < T_TUNDRA; ++j) set(&tp[j]->terrain, 't');
 	int firsttempered = j;
 
+	//Prepare the relative wetness field, for sorting on relative wetness
+	for (int k = firsttempered; k < firsthill; ++k) {
+		tiletype *t = tp[k];
+		int x,y;
+		recover_xy(tile, t, &x, &y);
+		int abovesea = t->height - seaheight;
+		int airix = 0;
+		while (airheight[airix] < abovesea) ++airix;
+		airboxtype * const ab = &air[x][y][airix];
+		float cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
+		if (cloudcap < 1) {
+			if (cloudcap < 0) {
+				cloudcap = 1.0 / -cloudcap;
+			} else cloudcap = 1;
+		}
+		t->relative_wetness = (float)t->wetness / cloudcap;
+	}
+
+
 	//Sort firsttempered to firsthill on wetness,
 	//divide into desert, plain, grass, forest, jungle, swamp
-	qsort(tp+firsttempered, firsthill-firsttempered, sizeof(tiletype *), &q_compare_wetness);
+	qsort(tp+firsttempered, firsthill-firsttempered, sizeof(tiletype *), &q_compare_relative_wetness);
 	int total = firsthill - firsttempered;
 #ifdef DBG
 	printf("First d wetness: %i\n", tp[j]->wetness);
@@ -1262,11 +1315,11 @@ Terrain assignment for extended tile set:
 */
 #define d_to_S 0.1
 #define p_to_S 0.3
-void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy]) {
+void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9]) {
 
 	int i = mapx * mapy;
 	//Sort on height, determine sea level, correct tile temperatures. Also sets seatiles and landtiles
-	sealevel(tp, land, tile, weather);
+	short seaheight = sealevel(tp, land, tile, weather);
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
@@ -1296,7 +1349,7 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	//Assign mountains
 	for (; j < i; ++j) tp[j]->terrain = 'm';
 
-	//Sort land tiles on temperature, except mountains. Separate arctic / nonarctic land
+	//Sort land tiles on temperature, except mountains. Separate arctic / tundra / tempered land
 	qsort(tp + firstland, landtiles-mountains, sizeof(tiletype *), &q_compare_temperature);
 
 	//Assign arctic terrain types
@@ -1309,9 +1362,35 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 #ifdef DBG
 	printf("%i tempered/tropical tiles\n", total);
 #endif
-	//Sort tempered/tropic low/hills on wetness, classify on wetness
-	qsort(tp + firsttempered, total, sizeof(tiletype *), &q_compare_wetness);
+	//Prepare the relative wetness field, for sorting on relative wetness
+	//Sorting on wetness alone is wrong. Cold places may have vary little rain, and
+	//become "desert". But a freeciv desert is a dry sand desert, like Sahara.
+	//Relative wetness: wetness, divided by evaporation potential.
+	//Little water but no evaporation (damp air, cold place): still a "wet" tile.
+	//Some water but lots of evaporation (dry air, high temperature): a "dry" tile
+	//Note that setting relative_wetness overwrites the old wetness field.
+	for (int k = 0; k < total; ++k) {
+		tiletype *t = tp[k + firsttempered];
+		int x,y;
+		recover_xy(tile, t, &x, &y);
+		int abovesea = t->height - seaheight;
+		int airix = 0;
+		while (airheight[airix] < abovesea) ++airix;
+		airboxtype * const ab = &air[x][y][airix];
+		float cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
+		if (cloudcap < 1) {
+			if (cloudcap < 0) {
+				cloudcap = 1.0 / -cloudcap;
+			} else cloudcap = 1;
+		}
+//		printf("%8i (%3i,%3i) cloudcap:%8.1f   wetness:%5i  ",k,x,y, cloudcap, t->wetness);
+		t->relative_wetness = (float)t->wetness / cloudcap;
+//		printf("  rel_wetness:%f\n", t->relative_wetness);
+	}
 
+	//Sort tempered/tropic low/hills on wetness, classify on wetness
+	qsort(tp + firsttempered, total, sizeof(tiletype *), &q_compare_relative_wetness);
+//do the same for output0...
 #ifdef DBG
 	printf("%i dD desert tiles\n", (int)(d_part/partsum*total));
 #endif
@@ -1319,7 +1398,6 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	limit = firsttempered + (d_part/partsum) * total;
 	for (; j < limit; ++j) {
 		set_tile(tp[j], 'd', 'D');
-		//printf("%c wetness:%5i\n",tp[j]->terrain, tp[j]->wetness);
 	}
 
 #ifdef DBG
@@ -1680,27 +1758,6 @@ void init_weather(tiletype tile[mapx][mapy], airboxtype air[mapx][mapy][9], weat
 	}
 }
 
-
-int airtemp(int height, int groundheight, int groundtemp) {
-	if (groundheight > 11000) return groundtemp; //No temperature fall above 11000
-  if (height > 11000) height = 11000;
-	int gdist = height - groundheight;
-	return groundtemp - 6.5 * gdist/1000;
-}
-
-//Temperature drops with 6.5 Celcius per km up from ground [wikipedia] 
-//this goes on to 11km, then no further drop.
-//How much water may an airbox hold?
-//More with higher temperature (8% per celsius) 
-//parameters are:
-//height of air above sea
-//height of ground below
-//ground temperature
-int cloudcapacity(int height, int groundheight, int groundtemp) {
-	int atemp = airtemp(height, groundheight, groundtemp);
-	//Capacity at 50 celsius is arbitrarily set to 50 000 "units" of water
-	return 50000 * powf(1.08, atemp-50);
-}
 
 /*
 	Push a cloud somewhere. Go up, if the airbox is underground
@@ -2447,10 +2504,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					t->height -= rocks;
 					t->rocks += rocks;
 				}
-
-
-//				t->height -= t->erosion;
-//				t->rocks += t->erosion;
 				t->erosion = 0;
 			}
 		}
@@ -2475,6 +2528,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			int airix = 0;
 			while (airheight[airix] < abovesea) ++airix;
 			airboxtype * const ab = &air[x][y][airix];
+			//Capacity of dry air, minus already present water
 			int cloudcap = cloudcapacity(abovesea, abovesea, t->temperature) - ab->water;
 			if (cloudcap < 0) cloudcap = 0;
 			//Found the cloud capacity over this tile. Sea and lake will evaporate to fill this capacity.
@@ -2617,9 +2671,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//print_platemap(tile); //dbg
 	FILE *f = fopen("tergen.sav", "w");
 	if (!tileset) {
-		output0(f, land, hillmountain, tempered, wateronland, tile, tp, weather);
+		output0(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air);
 	} else {
-		output1(f, land, hillmountain, tempered, wateronland, tile, tp, weather);
+		output1(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air);
 	}
 	fclose(f);
 }
