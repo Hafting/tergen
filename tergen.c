@@ -264,24 +264,25 @@ void my_sincosf(float x, float *sinx, float *cosx) {
 #define sincosf(a,b,c) my_sincosf(a,b,c)
 #endif
 
+//sizeof(tyiletype) Needed 34, actually used 40. Squeezed down to 32
 
 typedef struct {
-	short height; //Meters above lowest. Range 0–10000
-	short sediments; //This amount of the height is soft sediments. The rest is harder rock.
-	char terrain; //Freeciv terrain letter
-	char plate;   //id of tectonic plate this tile belongs to
-	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
-	unsigned char river : 1; //for river assignment during map output
-	short lake_ix; //If tile is a lake '+', index into lake table
-	unsigned char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5
-	char steepness : 5; //1+log2 of height difference to lowest neighbour. -1 if unset, max 14.
-	char temperature; //in celsius
 	int wetness; //rainfall adds, evaporation subtracts, river runoff subtracts
 	int waterflow; //amount in rivers. Wetness running off, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
-	char oldflow; //fourth root of prev. flow. Used for re-routing rivers
 	int rocks; //erosion, rocks that may follow the rivers and become sediment
 	int erosion; //Erosion, deferred to the next round
 	int rockflow;
+	short height; //Meters above lowest. Range 0–10000
+	short sediments; //This amount of the height is soft sediments. The rest is harder rock.
+	short lake_ix; //If tile is a lake '+', index into lake table
+	char terrain; //Freeciv terrain letter
+	char plate;   //id of tectonic plate this tile belongs to
+	signed char temperature; //in celsius
+	unsigned char oldflow; //fourth root of prev. flow. Used for re-routing rivers
+	char steepness : 5; //1+log2 of height difference to lowest neighbour. -1 if unset, max 14.
+	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
+	unsigned char river : 1; //for river assignment during map output
+	unsigned char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5
 } tiletype;
 
 
