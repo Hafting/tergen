@@ -888,7 +888,7 @@ Plan:
 //Sorts the tiles on height, determining the sea level because
 //x% of the tiles are sea, so the last sea tile gives the sea height.
 //Also determine tile temperatures based on being sea or land
-//Done every round, as erotion & tectonics change tile heights & sea level
+//Done every round, as erosion & tectonics change tile heights & sea level
 //Ensure that all sea tiles are lower than all land tiles, even if the land/sea ratio won't be perfect.
 short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy], int *sea_surplus) {
 	//Find the sea level by sorting on height. "land" is the percentage of land tiles
@@ -2779,6 +2779,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			printf("erode terrain\n");
 #endif
 			//Use water flow and rock flow to erode the terrain
+			//Land tiles only, so use tp[seatiles..mapx*mapy-1] instead!!!
 			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 				tiletype *t = &tile[x][y];
 				//More water moves more rocks. And more with more steepness
@@ -2794,6 +2795,14 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 				} else t->erosion = 0;
 			}
+			//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
+			//More erosion if there are several ocean tiles in the opposite direction, as
+			//waves will build up over distance. More erosion if the direction coincides with
+			//prevailing wind, and of course more if the wind is stronger.
+
+			//After collecting rocks (from coastal erosion as well as rivers), assume
+			//some current in the direction(s) of prevailing winds. If these directions
+			//leads to sea tiles, move rocks.
 		}
 	}
 
