@@ -624,37 +624,51 @@ int seacount(int x, int y, tiletype tile[mapx][mapy]) {
 	return cnt;
 }
 
-//Pieces of sea smaller than this, becomes lakes instead:
-#define MAX_LAKE 12
+//Pieces of sea smaller than this, becomes land instead:
+#define MIN_SEA 12
 
 char dfs_mark; //1 or 0
 int dfs_cnt;
 //Depth-first search to find the size of an ocean.
-void dfs_lake(int x, int y, tiletype tile[mapx][mapy], int mklake) {
+//Used to turn small pieces of sea into land, as many very small seas look silly.
+//sealevel() makes a little too much sea anyway, reclaiming it should be fine.
+void dfs_sea(int x, int y, tiletype tile[mapx][mapy], int mkland, short level) {
 	if (tile[x][y].mark == dfs_mark) return;
 	tile[x][y].mark = dfs_mark;
-	if (mklake) tile[x][y].terrain = '+';
-  if (++dfs_cnt > MAX_LAKE) return;
+	if (mkland) {
+//		tile[x][y].height += 15;
+//printf("level=%i   tile:%i     depth:%i\n",level,tile[x][y].height,tile[x][y].height-level);
+		//Up above sea level:
+		tile[x][y].height = level + 1 ;//+ (random() & 511);
+//DBG NO CHANGE, ok
+//level-1: lakes everywhere. Weird.
+//level+1: also lakes everywhere
+//level+1+random()  lakes everywhere.
+	}
+  if (++dfs_cnt > MIN_SEA) return;
 	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 	for (int n = 0; n < neighbours[topo]; ++n) {
 		int nx = wrap(x+nb[n].dx, mapx);
 		int ny = wrap(y+nb[n].dy, mapy);
-		if (is_sea(tile[nx][ny].terrain)) dfs_lake(nx, ny, tile, mklake);
+		if (tile[nx][ny].height <= level) dfs_sea(nx, ny, tile, mkland, level);
 	}
 }
 
-void start_dfs_lake(int x, int y, tiletype tile[mapx][mapy]) {
+//Returns true, if there were changes.
+bool start_dfs_sea(int x, int y, tiletype tile[mapx][mapy], short level) {
 	dfs_cnt = 0;
 	dfs_mark = 1;
-	dfs_lake(x, y, tile, 0);
-	if (dfs_cnt > MAX_LAKE) {
+	dfs_sea(x, y, tile, 0, level);   //Initial search. Sets marks and finds dfs_cnt
+	if (dfs_cnt > MIN_SEA) {
 		dfs_cnt = 0;
 		dfs_mark = 0;
-		dfs_lake(x, y, tile, 0); //reset marks
+		dfs_sea(x, y, tile, 0, level); //reset marks
+		return false;
 	} else {
 		dfs_cnt = 0;
 		dfs_mark = 0;
-		dfs_lake(x, y, tile, 1); //reset marks, make lake
+		dfs_sea(x, y, tile, 1, level); //reset marks, turn microsea into land
+		return true;
 	}
 }
 
@@ -710,7 +724,7 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 	int const neighcount = neighbours[topo];
 	int n;
 
-	//Reset mark on sea tiles, start_dfs_lake() depends on that
+	//Reset mark on sea tiles, start_dfs_sea() depends on that
 	tiletype **tt = &tp[seatiles];
 	while (tt-- != tp) (*tt)->mark = 0;
 
@@ -745,7 +759,6 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 	//improved erosion code means this don't happen, so no need for lake_to_sea() now.
 
 	//Fix some (but not all!) cases of deep sea next to land
-	//Turn small pieces of sea into lakes instead.
 
 	tt = &tp[seatiles];
 	while (tt-- != tp) {
@@ -753,15 +766,20 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 		recover_xy(tile, *tt, &x, &y);
 		tiletype * const t = *tt;
 		if (is_sea(t->terrain)) { //test, as a handful may have changed...
-			//Find deep sea next to land, and small lakes
+			//Find deep sea next to land
 			int seacnt = seacount(x, y, tile);
 			int landcnt = neighcount - seacnt;
+
+			if (landcnt >= 2) t->terrain = ' '; //Make it shallow
+			else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Be nice to triremes, usually
+/*
 			if (seacnt == 0) t->terrain = '+'; //Single-tile sea->lake. Ought to run a river to near sea, if possible.
 			else if (landcnt >= 2) {
 				t->terrain = ' '; //Make it shallow
 				//Convert to lake, if a small piece of sea is trapped:
-				start_dfs_lake(x, y, tile);
+				start_dfs_sea(x, y, tile); //!!! TO BE REMOVED
 			} else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Trireme benefit
+*/
 		}
 	}
 
@@ -820,6 +838,32 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 	}
 }
 
+/*
+The need for coast erosion.
+ - it happens on real planets, so simulating it is a good thing
+ - it solves a real problem too:
+
+ The strange terrain problem:
+ - first noticed when turning up land erosion, in the hope of getting more river valleys
+ - later noticed when removing small pieces of sea inside continents, by filling holes
+
+Terrain then turns very strange in both cases. The reason is that sea is turned into land.
+Either by hole-filling, or by erosion products filling the sea at river mouths.
+The problem aries because the user have specified a certain land/sea ratio, such as 30% land
+(and 70% sea). When sea is filled in, this is compensated by a rising sea level which turn
+an appropriate amount of land tiles into sea.  Unfortunately, some of these tiles will be
+in the middle of continents, so hole-filling just create new holes. This repeats on each
+round, and the end result is strange terrain: very small continents, and labyrinth-shaped
+islands/sea.
+
+Some sea rising may be natural, but too much must be avoided. Two approaches:
+ - enforced balance:  whenever sea tiles become land, forcibly sink the same
+   amount of land tiles. Balance is kept. Careful selection of the tiles to sink,
+	 i.e. coastal tiles only, avoids strange terrain and new sea-holes on land.
+ - coastal erosion. Happens on real planets: waves eat away coastal terrain,
+   transferring matter into nearby sea.
+
+	 */
 
 //Sorts the tiles on height, determining the sea level because
 //x% of the tiles are sea, so the last sea tile gives the sea height.
@@ -832,13 +876,47 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
 	landtiles = land * tilecnt / 100;
 	seatiles = tilecnt - landtiles;
+
 	if (!seatiles) seatiles = 1; //We'll crash with no sea at all. Where would rivers end?
+printf("seatiles init: %8i     ",seatiles);
 	//seatiles is the number of sea tiles, and index of the first land tile.
 	//Several tiles may have the same height. Move "seatiles" so the first land tile
-	//is higher up than the last sea tile.
+	//has higher elevation than the last sea tile. Results in slightly too much sea.
 	while (tp[seatiles]->height == tp[seatiles-1]->height) ++seatiles;
-	landtiles = tilecnt - seatiles;
 	short level = tp[seatiles-1]->height;
+printf("corr1: %8i       ", seatiles);
+	//At this point, we may have some very small pieces of "sea". This is ugly, and
+	//don't happen on real planets.
+	//Find such pieces using a counting depth-first search on every sea tile next
+	//to some land. dfs_sea() raises such tiles.
+	bool change = false;
+	for (int i = 0; i < seatiles; ++i) {
+		tiletype *t = tp[i];
+		if (t->height > level) continue; //Already raised
+		int x,y;
+		recover_xy(tile, t, &x, &y);
+		//A small sea inclusion WILL have some sea tiles with at least three land neighbours.
+		//To save time, run depth-first ONLY when there >= 3 land neighbours.
+		//Search the neighbourhood:
+		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		int landcnt = 0;
+		for (int n = 0; (n < neighbours[topo]) && (landcnt < 3); ++n) {
+			int nx = wrap(x+nb[n].dx, mapx);
+			int ny = wrap(y+nb[n].dy, mapy);
+			if (tile[nx][ny].height > level) ++landcnt;
+		}
+		if (landcnt >= 3) change |= start_dfs_sea(x, y, tile, level);
+	}
+
+	if (change) {
+		//Re-sort tp[], some heights changed. Determine the last sea tile again
+		qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
+		while (tp[seatiles-1]->height > level) --seatiles;
+printf("corr2: %8i",seatiles);
+	}
+printf("\n");
+
+	landtiles = tilecnt - seatiles;
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
 	for (int i = 0; i < seatiles; ++i) {
@@ -1330,7 +1408,8 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
 	//Savanna terrain type 'S'. Hot and dry, but not as dry as desert.
 	//Grab some of the desert part, and some of the plain part. High tiles will still
-	//become desert hills or normal hills. Low tiles will become savanna if they are hot enough.
+	//become desert hills or normal hills. Low tiles will become savanna if they
+	//are hot enough. If not, they stay desert/plain
 	float savanna_part = (d_part * d_to_S + p_part * p_to_S);
 	d_part *= (1.0-d_to_S); //reduce d_part and p_part accordingly
 	p_part *= (1.0-p_to_S);
@@ -2660,7 +2739,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					//Erosion from waterflow. Used to be 4.5. Now, 2 for bedrock and 2*3 for sediments
 					t->erosion = (sqrtf(t->waterflow) * t->steepness * 2) / rounds;
 					t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
-
+t->erosion /= 30; //DBG!!!
 					//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
 
 				} else t->erosion = 0;
