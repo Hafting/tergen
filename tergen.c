@@ -1500,7 +1500,7 @@ printf("output1 sea surplus: %i\n",surp);
 	//Sort tempered/tropic low/hills on wetness, classify on wetness
 	qsort(tp + firsttempered, total, sizeof(tiletype *), &q_compare_relative_wetness);
 //do the same for output0...
-#ifdef DBG/
+#ifdef DBG
 	printf("%i dD desert tiles\n", (int)(d_part/partsum*total));
 #endif
 	//Assign deserts (flat+hills)
@@ -2430,7 +2430,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 	//Number of rounds for tectonics & weather
 	//Use the largest coordinate, so clouds will have time to 
-	//get around the world.
+	//circle the world.
 	rounds = mapx > mapy ? mapx : mapy;
 
 	//Phase 2: plate tectonics, weather & erosion
@@ -2779,9 +2779,11 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			printf("erode terrain\n");
 #endif
 			//Use water flow and rock flow to erode the terrain
-			//Land tiles only, so use tp[seatiles..mapx*mapy-1] instead!!!
-			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-				tiletype *t = &tile[x][y];
+			//Land tiles only
+			for (int i = mapx*mapy-1; i >= seatiles; --i) {
+				tiletype *t = tp[i];
+				int x,y;
+				recover_xy(tile, t, &x, &y);
 				//More water moves more rocks. And more with more steepness
 				//Water erodes along the river bottom, which is part of the
 				//waterflow circumference. The circumference is proportional to
