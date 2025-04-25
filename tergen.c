@@ -639,7 +639,7 @@ void dfs_sea(int x, int y, tiletype tile[mapx][mapy], int mkland, short level) {
 //		tile[x][y].height += 15;
 //printf("level=%i   tile:%i     depth:%i\n",level,tile[x][y].height,tile[x][y].height-level);
 		//Up above sea level:
-		tile[x][y].height = level + 1 ;//+ (random() & 511);
+		tile[x][y].height = level + 1 + (random() & 511);
 //DBG NO CHANGE, ok
 //level-1: lakes everywhere. Weird.
 //level+1: also lakes everywhere
@@ -890,7 +890,7 @@ Plan:
 //Also determine tile temperatures based on being sea or land
 //Done every round, as erotion & tectonics change tile heights & sea level
 //Ensure that all sea tiles are lower than all land tiles, even if the land/sea ratio won't be perfect.
-short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy]) {
+short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], weatherdata weather[mapx][mapy], int *sea_surplus) {
 	//Find the sea level by sorting on height. "land" is the percentage of land tiles
 	int tilecnt = mapx*mapy;
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
@@ -902,7 +902,10 @@ printf("seatiles init: %8i     ",seatiles);
 	//seatiles is the number of sea tiles, and index of the first land tile.
 	//Several tiles may have the same height. Move "seatiles" so the first land tile
 	//has higher elevation than the last sea tile. Results in slightly too much sea.
-	while (tp[seatiles]->height == tp[seatiles-1]->height) ++seatiles;
+	while (tp[seatiles]->height == tp[seatiles-1]->height) {
+		++seatiles;
+		++*sea_surplus;
+	}
 	short level = tp[seatiles-1]->height;
 printf("corr1: %8i       ", seatiles);
 	//At this point, we may have some very small pieces of "sea". This is ugly, and
@@ -931,7 +934,10 @@ printf("corr1: %8i       ", seatiles);
 	if (change) {
 		//Re-sort tp[], some heights changed. Determine the last sea tile again
 		qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
-		while (tp[seatiles-1]->height > level) --seatiles;
+		while (tp[seatiles-1]->height > level) {
+			--seatiles;
+			--*sea_surplus;
+		}
 printf("corr2: %8i",seatiles);
 	}
 printf("\n");
@@ -1199,7 +1205,9 @@ It also affect the amount of desert and the forest/jungle allocation. 50 is norm
 */
 void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9]) {
 	int i = mapx*mapy;
-	short seaheight = sealevel(tp, land, tile, weather); //Also sorts on height, and sets seatiles and landtiles
+	int surp = 0;
+	short seaheight = sealevel(tp, land, tile, weather, &surp); //Also sorts on height, and sets seatiles and landtiles
+printf("sea surplus output0: %i\n",surp);
 	int shallowsea = seatiles/3;
 	int deepsea = seatiles - shallowsea;
 
@@ -1417,7 +1425,9 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 	int i = mapx * mapy;
 	//Sort on height, determine sea level, correct tile temperatures. Also sets seatiles and landtiles
-	short seaheight = sealevel(tp, land, tile, weather);
+	int surp = 0;
+	short seaheight = sealevel(tp, land, tile, weather, &surp);
+printf("output1 sea surplus: %i\n",surp);
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
@@ -1490,7 +1500,7 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	//Sort tempered/tropic low/hills on wetness, classify on wetness
 	qsort(tp + firsttempered, total, sizeof(tiletype *), &q_compare_relative_wetness);
 //do the same for output0...
-#ifdef DBG
+#ifdef DBG/
 	printf("%i dD desert tiles\n", (int)(d_part/partsum*total));
 #endif
 	//Assign deserts (flat+hills)
@@ -2062,7 +2072,7 @@ void merge_lakes(int old_lake, int new_lake, tiletype *old_outlet) {
 
 void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 #ifdef DBG
-	printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
+	//printf("mk_lake(%i, %i, tile, %i)\n", x,y,river_serial);
 #endif
 	int lake_ix = lakes;
 	if (lake_ix > MAX_LAKES) fail("Too many lakes, recompile with bigger MAX_LAKES");
@@ -2513,13 +2523,21 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	/* Move plates */
 	printf("Plate tectonics with %i plates\n", plates);
 	int asteroids = mapx / 16;
+
+	//No tracking through tectonic events/asteroid strikes. In those cases,
+	//the sea gets to find a new level on its own.
+	//The tracking allows mitigating bad effects from erosion/hole-plugging.
+	//Tectonics does not seem to create bad effects on its own.
+	//positive: too much sea, neg: too much land. Expected to be positive
+	int sea_surplus = 0;
+	short seaheight = 0; //later set by sealevel. 0 won't matter, less action the first round.
 	for (int i = 1; i <= rounds; ++i) {
 
 		//No heightmap changes the LAST round.
 		//This prevents sealevel changes that could leave rivers stopped
 		//before the coast, or drown the edge between a lake and the sea.
 		if (i < rounds) { //Allow height changes from tectonics/erosion/deposits
-
+                      //!!!needed? river/lakes happens LATER, might fix itself?
 			//Move the plates
 			for (int p = 0; p < plates; ++p) {
 				platetype *pl = &plate[p];
@@ -2562,6 +2580,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Apply erosion planned the previous round.
 			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 				tiletype *t = &tile[x][y];
+				short old_height = t->height;
 				int sediment_percent;
 				switch (t->terrain) {
 					case ':': //sea
@@ -2571,7 +2590,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 						sediment_percent = 75;
 						break;
 					default:
-						sediment_percent = 20;
+						sediment_percent = 20; //depend on steepness?
 						break;
 				}
 
@@ -2604,14 +2623,25 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					t->rocks += rocks;
 				}
 				t->erosion = 0;
+//printf("oldh: %5i    newh: %5i    diff: %5i seaheight: %5i\n",old_height,t->height,t->height-old_height,seaheight);
+				//Track land/sea changes due to erosion and sediment deposits:
+				if (old_height <= seaheight && t->height > seaheight) --sea_surplus;
+				else if (old_height > seaheight && t->height <= seaheight) ++sea_surplus;
 			}
-		}
+		} //if NOT last round
 #ifdef DBG		
 		printf("weather, round %i\n",i);
 		printf("evaporation\n");
 #endif
+#ifdef DBG
+		printf("sea_surplus before sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
+#endif
+
 		//Terrain changed last round, recompute land/sea and sea level
-		int seaheight = sealevel(tp, land, tile, weather);  //After this, tp is sorted on height.
+		seaheight = sealevel(tp, land, tile, weather, &sea_surplus);  //After this, tp is sorted on height.
+#ifdef DBG
+		printf("sea_surplus after  sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
+#endif
 		//Evaporate water from all tiles, deposit into air above
 		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 			tiletype *t = &tile[x][y];
@@ -2759,7 +2789,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					//Erosion from waterflow. Used to be 4.5. Now, 2 for bedrock and 2*3 for sediments
 					t->erosion = (sqrtf(t->waterflow) * t->steepness * 2) / rounds;
 					t->erosion += 5*t->rockflow / 100; //Erosion from rocks dragged along river bottoms
-t->erosion /= 30; //DBG!!!
+
 					//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
 
 				} else t->erosion = 0;
