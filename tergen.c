@@ -2537,7 +2537,10 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		//This prevents sealevel changes that could leave rivers stopped
 		//before the coast, or drown the edge between a lake and the sea.
 		if (i < rounds) { //Allow height changes from tectonics/erosion/deposits
-                      //!!!needed? river/lakes happens LATER, might fix itself?
+                      //needed? river/lakes happens LATER, might fix itself?
+											//no, sealevel() re-runs in output, and MUST get the same result.
+			                //may remove if-test, IF we can avoid running sealevel() in output.
+											//i.e. use the established seaheight and sort order. !!!
 			//Move the plates
 			for (int p = 0; p < plates; ++p) {
 				platetype *pl = &plate[p];
@@ -2574,6 +2577,33 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			if (asteroids && !(random() % (mapx/16)) ) {
 				--asteroids;
 				asteroid_strike(tile);
+			}
+
+			//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
+			//More erosion if there are several ocean tiles in the opposite direction, as
+			//waves will build up over distance. More erosion if the direction coincides with
+			//prevailing wind, and of course more if the wind is stronger.
+
+			//After collecting rocks (from coastal erosion), assume
+			//some current in the direction(s) of prevailing winds. If these directions
+			//leads to sea tiles, move rocks that way.
+
+			for (int i = 0; i < seatiles; ++i) {
+				tiletype *t = tp[i];
+				if (t->terrain != ':') fail("wrong terrain coastal erosion???");
+				int x,y;
+				recover_xy(tile, t, &x, &y);
+				//Look for any coastal neighbours:
+				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+				for (int n = 0; n < neighbours[topo]; ++n) {
+					tiletype *land = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
+					if (land->terrain != 'm') continue;
+					//Found a land neighbour.
+					//waves get bigger, if they can build up over a length of sea.
+					//Check for 0,1,2,3 sea neighbours in the opposite direction:
+					//!!!
+
+				}
 			}
 
 			//Let moved rocks become sediments.
@@ -2627,7 +2657,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				//Track land/sea changes due to erosion and sediment deposits:
 				if (old_height <= seaheight && t->height > seaheight) --sea_surplus;
 				else if (old_height > seaheight && t->height <= seaheight) ++sea_surplus;
-			}
+			} //erosion double loop
 		} //if NOT last round
 #ifdef DBG		
 		printf("weather, round %i\n",i);
@@ -2776,7 +2806,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		if (i < rounds) {
 			mass_transport(tile, tp);
 #ifdef DBG
-			printf("erode terrain\n");
+			printf("erosion based on waterflow\n");
 #endif
 			//Use water flow and rock flow to erode the terrain
 			//Land tiles only
@@ -2797,14 +2827,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 				} else t->erosion = 0;
 			}
-			//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
-			//More erosion if there are several ocean tiles in the opposite direction, as
-			//waves will build up over distance. More erosion if the direction coincides with
-			//prevailing wind, and of course more if the wind is stronger.
-
-			//After collecting rocks (from coastal erosion as well as rivers), assume
-			//some current in the direction(s) of prevailing winds. If these directions
-			//leads to sea tiles, move rocks.
 		}
 	}
 
