@@ -863,6 +863,26 @@ Some sea rising may be natural, but too much must be avoided. Two approaches:
  - coastal erosion. Happens on real planets: waves eat away coastal terrain,
    transferring matter into nearby sea.
 
+The best solution may involve a combination:
+1. Track land/sea imbalance:
+   + Sea being filled in by erosion products
+	 + Sea-holes on land being filled explicitly
+	 - land eroding below sea level (river becomes fjord)
+   - coast eroded below sea level by waves
+	 - too much sea due to "all tiles AT sea level must be sea, many have the same height."
+
+2. If there is too much land, sink random coast tiles by lowering. (Not landlocked tiles)
+   This mimicks a natural process: catastrophic landslides into the sea.
+
+3. Too much sea should not happen. If it happens, tune it out with less coastal erosion.
+   May need testing: worlds with 5%, 20% 50% 70% 95% sea...
+
+Plan:
+1. Track the land/sea imbalance, debug printouts
+2. Implement wave-based coastal erosion
+3. Implement landslide corrections, tune
+4. Comment out debug printouts, but keep them. Planned changes to erosion may need re-tuning
+
 	 */
 
 //Sorts the tiles on height, determining the sea level because
