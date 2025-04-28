@@ -2178,6 +2178,23 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 	} while (true);
 }
 
+//Drop rocks onto a sea/lake tile. Scatter some to neighbouring sea/lake tiles
+void scatter_rocks(tiletype tile[mapx][mapy], int x, int y, int rocks) {
+	if (!rocks) return;
+	int scatter = rocks / 8;
+	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+	if (scatter) for (int n = neighbours[topo]; n--;) {
+		int nx = wrap(x+nb[n].dx, mapx);
+		int ny = wrap(y+nb[n].dy, mapy);
+		tiletype *tn = &tile[nx][ny];
+		if (tn->terrain == ':' || tn->terrain == '+') {
+			tn->rocks += scatter;
+			rocks -= scatter;
+		}
+	}
+	tile[x][y].rocks += rocks;
+}
+
 //Let rain water flow from every tile to the sea.
 //tp is pointers into the tile array, sorted on height. Tallest is last.
 //unmarked tiles have unmoved water. marked tiles has a precomputed path for water flow
@@ -2316,22 +2333,36 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 			t = next;
 			x = nx; y = ny;
 		}
-		//Scatter remaining rocks on this and neighbouring sea/lake tiles:
-		if (rocks > 0.0) {
-			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-			float scatter = rocks/10;
-			for (int n = neighbours[topo]; n--;) {
-				int nx = wrap(x+nb[n].dx, mapx);
-				int ny = wrap(y+nb[n].dy, mapy);
-				tiletype *tn = &tile[nx][ny];
-				if (tn->terrain == ':' || tn->terrain == '+') {
-					tn->rocks += scatter;
-					rocks -= scatter;
-				}
-			}
-			t->rocks += scatter;
-		}
+		//Scatter remaining rocks on this and any neighbouring sea/lake tiles:
+		scatter_rocks(tile, x, y, rocks);
 	}
+}
+
+//Apply planned erosion to a tile (reducing its height and sediments),
+//return the amount of movable rocks generated
+//caller must handle the rocks.
+//sediments are softer than bedrock, and erodes more. they are on top, and erodes first.
+//height and sediment is not floats, so take care
+int erode(tiletype *t) {
+	int rocks;
+	if (t->sediments >= 3*t->erosion) {
+		//All erosion taken from sediments
+		rocks = (int) (3*t->erosion);
+		t->sediments -= rocks;
+		t->erosion -= rocks / 3;
+	} else {
+		//Erosion of sediments and bedrock
+		//Use up the sediments
+		rocks = t->sediments;
+		t->sediments = 0;
+		t->erosion -= rocks / 3;
+		//Erode bedrock too
+		rocks += t->erosion;
+		t->erosion -= (int)t->erosion; //Keep fractions for the future
+	}
+	//Apply the erosion
+	t->height -= rocks;
+	return rocks;
 }
 
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
@@ -2570,7 +2601,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
 			//More erosion if there are several ocean tiles in the opposite direction, as
 			//waves will build up over distance. More erosion if the direction coincides with
-			//prevailing wind, and of course more if the wind is stronger.
+			//prevailing wind, and of course more if that wind is stronger.
 
 			//After collecting rocks (from coastal erosion), assume
 			//some current in the direction(s) of prevailing winds. If these directions
@@ -2578,20 +2609,41 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 			for (int i = 0; i < seatiles; ++i) {
 				tiletype *t = tp[i];
-//happened?
-//				if (t->terrain != ':') fail("wrong terrain coastal erosion???");
+
+				if (t->height > seaheight) continue; //Tectonics or asteroid disturbed the heightmap
 				int x,y;
 				recover_xy(tile, t, &x, &y);
 				//Look for any coastal neighbours:
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 				for (int n = 0; n < neighbours[topo]; ++n) {
 					tiletype *land = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
-					if (land->terrain != 'm') continue;
+					if (land->height <= seaheight) continue; //The tile was not land
 					//Found a land neighbour.
 					//waves get bigger, if they can build up over a length of sea.
 					//Check for 0,1,2,3 sea neighbours in the opposite direction:
-					//!!!
-
+					int anti_n = (n + (neighbours[topo] / 2)) % neighbours[topo];
+					int strength = 1;
+					int mx = x, my = y;
+					for (int m = 0; m < 3; ++m) {
+						neighbourtype *mb = (my & 1) ? nodd[topo] : nevn[topo];
+						mx = wrap(mx+mb[anti_n].dx,mapx);
+						my = wrap(my+mb[anti_n].dy,mapy);
+						if (tile[mx][my].terrain != ':') break;
+						++strength;
+					}
+					//Have 1,2,3 or 4 (length) sea tiles for building waves against the "land" tile.
+					//Check if it coincides with prevailing wind:
+					if (weather[x][y].prevailing1 == n || weather[x][y].prevailing2 == n) strength *= (weather[x][y].prevailing_strength + 1);
+					//Have an erosion strength from 1 to 16
+					//Correct for number of turns:
+					float wave_erosion = 50.0 * strength / rounds;
+printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
+					land->erosion += wave_erosion;
+					//erode the land tile immediately, get rocks to scatter
+					int rocks = erode(land);
+					if (land->height <= seaheight) ++sea_surplus; //Land was eroded away
+					//Now scatter these rocks:
+					scatter_rocks(tile, x, y, rocks);
 				}
 			}
 
@@ -2622,26 +2674,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				//Apply any deferred erosion, terrain becomes loose rocks:
 				//Sediments erode 3x more than solid rock:
 
-				if (t->sediments >= 3 * t->erosion) {
-					//Erosion of sediments only
-					rocks = 3 * t->erosion;
-					t->sediments -= rocks;
-					t->height -= rocks;
-					t->rocks += rocks;
-					t->erosion -= rocks;
-				} else {
-					//Erosion of sediments
-					rocks = (t->sediments / 3);
-					t->erosion -= rocks;
-					rocks *= 3; // sediment / 3 * 3 avoids roundoff errors in sediments
-					t->sediments -= rocks;
-
-					//Remaining erosion of bedrock
-					rocks += t->erosion;
-					t->erosion -= (int)t->erosion; //Keep fractions for later
-					t->height -= rocks;
-					t->rocks += rocks;
-				}
+				rocks = erode(t);
+				t->rocks += rocks;
 
 //printf("oldh: %5i    newh: %5i    diff: %5i seaheight: %5i\n",old_height,t->height,t->height-old_height,seaheight);
 				//Track land/sea changes due to erosion and sediment deposits:
