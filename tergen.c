@@ -2707,7 +2707,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					short delta = (seaheight - tn->height) / 2;
 					tn->height += delta;
 					t->height -= delta;
-t->height = seaheight / 2; //stupid FORCING
+//t->height = seaheight / 2; //stupid FORCING
 					if (t->height <= seaheight) ++sea_surplus;
 				}
 			}
