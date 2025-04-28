@@ -883,7 +883,7 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	seatiles = tilecnt - landtiles;
 
 	if (!seatiles) seatiles = 1; //We'll crash with no sea at all. Where would rivers end?
-printf("seatiles init: %8i     ",seatiles);
+printf("seatiles init: %6i     ",seatiles);
 	//seatiles is the number of sea tiles, and index of the first land tile.
 	//Several tiles may have the same height. Move "seatiles" so the first land tile
 	//has higher elevation than the last sea tile. Results in slightly too much sea.
@@ -892,12 +892,13 @@ printf("seatiles init: %8i     ",seatiles);
 		++*sea_surplus;
 	}
 	short level = tp[seatiles-1]->height;
-printf("corr1: %8i       ", seatiles);
+printf("corr1: %6i       ", seatiles);
 	//At this point, we may have some very small pieces of "sea". This is ugly, and
 	//don't happen on real planets.
 	//Find such pieces using a counting depth-first search on every sea tile next
 	//to some land. dfs_sea() raises such tiles.
 	bool change = false;
+
 	for (int i = 0; i < seatiles; ++i) {
 		tiletype *t = tp[i];
 		if (t->height > level) continue; //Already raised
@@ -914,6 +915,7 @@ printf("corr1: %8i       ", seatiles);
 			if (tile[nx][ny].height > level) ++landcnt;
 		}
 		if (landcnt >= 3) change |= start_dfs_sea(x, y, tile, level);
+		if (change) break; //DBG!!! only one hole plugged.
 	}
 
 	if (change) {
@@ -923,8 +925,9 @@ printf("corr1: %8i       ", seatiles);
 			--seatiles;
 			--*sea_surplus;
 		}
-printf("corr2: %8i",seatiles);
+printf("corr2: %6i",seatiles);
 	}
+
 printf("\n");
 
 	landtiles = tilecnt - seatiles;
@@ -2637,7 +2640,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					//Have an erosion strength from 1 to 16
 					//Correct for number of turns:
 					float wave_erosion = 50.0 * strength / rounds;
-printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
+//printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
 					land->erosion += wave_erosion;
 					//erode the land tile immediately, get rocks to scatter
 					int rocks = erode(land);
@@ -2682,11 +2685,53 @@ printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
 				if (old_height <= seaheight && t->height > seaheight) --sea_surplus;
 				else if (old_height > seaheight && t->height <= seaheight) ++sea_surplus;
 			} //erosion double loop
-		} //if NOT last round
-#ifdef DBG		
-		printf("weather, round %i\n",i);
-		printf("evaporation\n");
+
+			//We may have too little sea, (neg. surplus) due to sea being filled with eroded rocks
+#ifdef DBG
+		printf("sea_surplus before landslides: %i  seaheight:%i\n", sea_surplus,seaheight);
 #endif
+
+			//Landslides to fix negative sea surplus:
+			for (int i = seatiles; i < mapx*mapy && sea_surplus < 0; ++i) {
+				printf(".");
+				tiletype *t = tp[i];
+				int x,y;
+				recover_xy(tile, t, &x, &y);
+				if (t->height <= seaheight) continue;
+				//Land tile. See if there is sea to slide into:
+				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+				tiletype *tn = &tile[wrap(x+nb[t->lowestneigh].dx, mapx)][wrap(y+nb[t->lowestneigh].dy, mapy)];
+				if (tn->height < seaheight - 2) {
+					printf(",");
+					//Keep the seatile sea. Maybe the land tile drowns:
+					short delta = (seaheight - tn->height) / 2;
+					tn->height += delta;
+					t->height -= delta;
+t->height = seaheight / 2; //stupid FORCING
+					if (t->height <= seaheight) ++sea_surplus;
+				}
+			}
+			printf("\n");
+			//!!! MYSTERY
+			//Landslides do NOT turn enough land tiles into sea.  Are ALL neighbour sea tiles too shallow then?
+			//Added that stupid FORCING line. The land tile is drowned unconditionally.
+			//But the sea_surplus keep going deeper into the negatives anyway!!! and sealevel()
+			//raises the sea level more and more and more each round.
+			//huge corr2 all the time, expected none...
+
+			//commented out hole plugging:  gets FALLING sea levels instead :-( rising sea_surplus
+			//The terrain do not get crazy. Obviously, there are sea-holes.
+
+			//DBG ATTEMPT plug only one sea-hole, instead of ALL
+			//gets a few rounds of plugging, then sea surplus keep increasing, and so does
+			//the sea level!  More and more tiles having exactly the same height, and that
+			//same height increases ???
+
+			//Are they adding more sediment everywhere, every round ???
+
+
+		} //if NOT last round
+
 #ifdef DBG
 		printf("sea_surplus before sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
 #endif
@@ -2695,6 +2740,10 @@ printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
 		seaheight = sealevel(tp, land, tile, weather, &sea_surplus);  //After this, tp is sorted on height.
 #ifdef DBG
 		printf("sea_surplus after  sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
+#endif
+#ifdef DBG
+		printf("weather, round %i\n",i);
+		printf("evaporation\n");
 #endif
 		//Evaporate water from all tiles, deposit into air above
 		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
