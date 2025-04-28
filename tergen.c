@@ -915,7 +915,7 @@ printf("corr1: %6i       ", seatiles);
 			if (tile[nx][ny].height > level) ++landcnt;
 		}
 		if (landcnt >= 3) change |= start_dfs_sea(x, y, tile, level);
-		if (change) break; //DBG!!! only one hole plugged.
+//		if (change) break; //DBG!!! only one hole plugged.
 	}
 
 	if (change) {
@@ -927,7 +927,6 @@ printf("corr1: %6i       ", seatiles);
 		}
 printf("corr2: %6i",seatiles);
 	}
-
 printf("\n");
 
 	landtiles = tilecnt - seatiles;
@@ -2698,6 +2697,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				int x,y;
 				recover_xy(tile, t, &x, &y);
 				if (t->height <= seaheight) continue;
+				printf("L");
 				//Land tile. See if there is sea to slide into:
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 				tiletype *tn = &tile[wrap(x+nb[t->lowestneigh].dx, mapx)][wrap(y+nb[t->lowestneigh].dy, mapy)];
@@ -2709,7 +2709,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					t->height -= delta;
 //t->height = seaheight / 2; //stupid FORCING
 					if (t->height <= seaheight) ++sea_surplus;
-				}
+				} else printf("*");
 			}
 			printf("\n");
 			//!!! MYSTERY
@@ -2731,6 +2731,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 
 		} //if NOT last round
+
+int lim = mapx;
+if (mapy < mapx) lim = mapy;
+for (int i = 0; i < lim; ++i) {
+	tiletype *t = &tile[i][i];
+	printf("i:%2i  rocks:%2i  height:%4i  sedim:%4i   %c\n",i,(int)t->rocks,t->height,t->sediments,t->terrain);
+}
 
 #ifdef DBG
 		printf("sea_surplus before sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
