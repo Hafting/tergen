@@ -272,9 +272,9 @@ typedef struct {
 		float relative_wetness; //Used when assigning freeciv terrain types
 	};
 	int waterflow; //amount in rivers. Wetness running off, plus incoming flow from higher tiles. Sum of incoming waterflows and runoff from wetness
-	int rocks; //erosion, rocks that may follow the rivers and become sediment
-	int erosion; //Erosion, deferred to the next round
-	int rockflow;
+	float rocks; //erosion, rocks that may follow the rivers and later become sediment
+	float erosion; //Erosion, deferred to the next round. A float may accumulate amounts <1
+	float rockflow;
 	short height; //Meters above lowest. Range 0–10000
 	short sediments; //This amount of the height is soft sediments. The rest is harder rock.
 	short lake_ix; //If tile is a lake '+', index into lake table
@@ -631,19 +631,12 @@ char dfs_mark; //1 or 0
 int dfs_cnt;
 //Depth-first search to find the size of an ocean.
 //Used to turn small pieces of sea into land, as many very small seas look silly.
-//sealevel() makes a little too much sea anyway, reclaiming it should be fine.
 void dfs_sea(int x, int y, tiletype tile[mapx][mapy], int mkland, short level) {
 	if (tile[x][y].mark == dfs_mark) return;
 	tile[x][y].mark = dfs_mark;
 	if (mkland) {
-//		tile[x][y].height += 15;
-//printf("level=%i   tile:%i     depth:%i\n",level,tile[x][y].height,tile[x][y].height-level);
 		//Up above sea level:
 		tile[x][y].height = level + 1 + (random() & 511);
-//DBG NO CHANGE, ok
-//level-1: lakes everywhere. Weird.
-//level+1: also lakes everywhere
-//level+1+random()  lakes everywhere.
 	}
   if (++dfs_cnt > MIN_SEA) return;
 	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
@@ -710,7 +703,7 @@ height, then parts are sorted on temperature & wetness. Finally, land tiles are 
 on waterflow. The tile order is then very different from the order in tile[][].
 
 To further randomize, step through tp[] with large jumps, similar to the search order
-in a hash table. It is then nexessary to find a step size relative prime to mapx*mapy,
+in a hash table. It is then necessary to find a step size relative prime to mapx*mapy,
 which is easy enough.
 
 Using the sorted tp has other advantages too. Deep sea correction should not iterate through land tiles.
@@ -772,14 +765,6 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 
 			if (landcnt >= 2) t->terrain = ' '; //Make it shallow
 			else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Be nice to triremes, usually
-/*
-			if (seacnt == 0) t->terrain = '+'; //Single-tile sea->lake. Ought to run a river to near sea, if possible.
-			else if (landcnt >= 2) {
-				t->terrain = ' '; //Make it shallow
-				//Convert to lake, if a small piece of sea is trapped:
-				start_dfs_sea(x, y, tile); //!!! TO BE REMOVED
-			} else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Trireme benefit
-*/
 		}
 	}
 
@@ -2218,7 +2203,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		t->waterflow = 3*t->wetness / (7 - t->steepness/4);
 		t->wetness -= t->waterflow;
 		t->mark = 0;
-		t->rockflow = 0;
+		t->rockflow = 0.0;
 	}
 
 	lakes = 0; //Until we find some
@@ -2297,14 +2282,14 @@ int rock_capacity(int waterflow, int steepness) {
 void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
   for (int i = mapx*mapy - 1; tp[i]->terrain != ':' && i >= 0; --i) {
 		tiletype *t = tp[i];
-		if (!t->rocks || t->terrain != 'm') continue;
+		if (t->rocks == 0.0 || t->terrain != 'm') continue;
 
 		//Pick up rocks:
-		int rocks = t->rocks;
-		t->rocks = 0;
+		float rocks = t->rocks;
+		t->rocks = 0.0;
 		int x, y;
 		recover_xy(tile, t, &x, &y);
-		while (rocks && t->terrain != ':' && t->terrain != '+') {
+		while ( (rocks != 0.0) && t->terrain != ':' && t->terrain != '+') {
 			//Waterflow with rocks arrived here.
 			//Drop rocks if the flow holds many:
 			int capacity = rock_capacity(t->waterflow, t->steepness) - t->rockflow;
@@ -2313,7 +2298,7 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 				rocks = capacity;
 			}	else if (t->steepness <= 5) {
 				//Flooding in flat landscapes, scatter some rocks
-				int scatter = rocks / (t->steepness+2);
+				float scatter = rocks / (t->steepness+2);
 				rocks -= scatter;
 				t->rocks += scatter;
 			}
@@ -2332,9 +2317,9 @@ void mass_transport(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 			x = nx; y = ny;
 		}
 		//Scatter remaining rocks on this and neighbouring sea/lake tiles:
-		if (rocks) {
+		if (rocks > 0.0) {
 			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-			int scatter = rocks/10;
+			float scatter = rocks/10;
 			for (int n = neighbours[topo]; n--;) {
 				int nx = wrap(x+nb[n].dx, mapx);
 				int ny = wrap(y+nb[n].dy, mapy);
@@ -2512,8 +2497,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//Initialize other fields in the tile array
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
 		tiletype *t = &tile[x][y];
-		t->rocks = 0;
-		t->erosion = 0;
+		t->rocks = 0.0;
+		t->erosion = 0.0;
 	}
 
 	//Terrain BEFORE plate tectonics (debug):
@@ -2524,11 +2509,12 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	printf("Plate tectonics with %i plates\n", plates);
 	int asteroids = mapx / 16;
 
-	//No tracking through tectonic events/asteroid strikes. In those cases,
+	//No sea tracking through tectonic events/asteroid strikes. In those cases,
 	//the sea gets to find a new level on its own.
 	//The tracking allows mitigating bad effects from erosion/hole-plugging.
 	//Tectonics does not seem to create bad effects on its own.
-	//positive: too much sea, neg: too much land. Expected to be positive
+	//positive: too much sea, neg: too much land. hole plugging and
+	//erosion products filling the sea causes a negative imbalance.
 	int sea_surplus = 0;
 	short seaheight = 0; //later set by sealevel. 0 won't matter, less action the first round.
 	for (int i = 1; i <= rounds; ++i) {
@@ -2574,6 +2560,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 			}
 			/* Run weather & erosion */
+
+			/* Asteroid strikes */
 			if (asteroids && !(random() % (mapx/16)) ) {
 				--asteroids;
 				asteroid_strike(tile);
@@ -2590,7 +2578,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 			for (int i = 0; i < seatiles; ++i) {
 				tiletype *t = tp[i];
-				if (t->terrain != ':') fail("wrong terrain coastal erosion???");
+//happened?
+//				if (t->terrain != ':') fail("wrong terrain coastal erosion???");
 				int x,y;
 				recover_xy(tile, t, &x, &y);
 				//Look for any coastal neighbours:
@@ -2629,9 +2618,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				t->height += rocks;
 				t->sediments += rocks;
 				t->rocks -= rocks;
+
 				//Apply any deferred erosion, terrain becomes loose rocks:
 				//Sediments erode 3x more than solid rock:
-
 
 				if (t->sediments >= 3 * t->erosion) {
 					//Erosion of sediments only
@@ -2639,6 +2628,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					t->sediments -= rocks;
 					t->height -= rocks;
 					t->rocks += rocks;
+					t->erosion -= rocks;
 				} else {
 					//Erosion of sediments
 					rocks = (t->sediments / 3);
@@ -2648,11 +2638,11 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 					//Remaining erosion of bedrock
 					rocks += t->erosion;
-
+					t->erosion -= (int)t->erosion; //Keep fractions for later
 					t->height -= rocks;
 					t->rocks += rocks;
 				}
-				t->erosion = 0;
+
 //printf("oldh: %5i    newh: %5i    diff: %5i seaheight: %5i\n",old_height,t->height,t->height-old_height,seaheight);
 				//Track land/sea changes due to erosion and sediment deposits:
 				if (old_height <= seaheight && t->height > seaheight) --sea_surplus;
@@ -2825,7 +2815,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 					//printf("erosion: %5i  erosion*rounds:%5i, flow:%5i   steepness:%5i   rockflow:%5i\n",t->erosion,t->erosion*rounds,t->waterflow,t->steepness, t->rockflow);
 
-				} else t->erosion = 0;
+				} else t->erosion = 0.0;
 			}
 		}
 	}
