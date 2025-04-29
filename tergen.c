@@ -2723,6 +2723,16 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 					short delta = (seaheight - tn->height) / 2;
 					tn->height += delta;
 					t->height -= delta;
+t->height=0;//FORCE. Drown the coast tile unconditionally.
+//Strangely, even such brutalism is not enough? !!!
+//sea level goes up up up
+/*
+At first, there is small neg. sea surplus. Coast erosion and landslides brings that down to 0. Then sealevel() recreates the neg. surplus. Landslides brings it to 0 again, and sealevel() brings it to a larger negative, always larger!  Sea level fluctuates mildly. When the neg. surplus reaches -300 or so, landslides no longer succeed in reinstating enough sea. After that, sea rises with 30 or so per round, and sea surplus fall with 30 or so.
+
+Why do sealevel() make a sea deficit that is worse EVERY TIME?
+some mysterious bug?
+
+	 */
 					if (t->height <= seaheight) ++sea_surplus;
 				} //else printf("*");
 			}
