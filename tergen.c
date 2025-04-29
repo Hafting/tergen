@@ -285,7 +285,7 @@ typedef struct {
 	char steepness : 5; //1+log2 of height difference to lowest neighbour. -1 if unset, max 14.
 	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
 	unsigned char river : 1; //for river assignment during map output
-	unsigned char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5
+	signed char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5. -1 for none
 } tiletype;
 
 
@@ -915,7 +915,6 @@ printf("corr1: %6i       ", seatiles);
 			if (tile[nx][ny].height > level) ++landcnt;
 		}
 		if (landcnt >= 3) change |= start_dfs_sea(x, y, tile, level);
-//		if (change) break; //DBG!!! only one hole plugged.
 	}
 
 	if (change) {
@@ -950,6 +949,7 @@ printf("\n");
 	int half = (neighbours[topo]+2)/2;
 	memset(tmptemp, 0, mapx*mapy*sizeof(signed char));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+if (tile[x][y].height > level && tile[x][y].lowestneigh == -1) printf("NEG %3i,%3i '%c'\n",x,y,tile[x][y].terrain);//DBG!!!
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int sum = 2 * (int)tile[x][y].temperature;
 		for (int n = 0; n < neighbours[topo]; ++n) {
@@ -1009,18 +1009,23 @@ laketype lake[MAX_LAKES];
 	 */
 
 //Run a single river to the sea/a lake/another river
-void run_visible_river(int x, int y, tiletype tile[mapx][mapy]) {
+void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel) {
 	while (1) {
 		tiletype *t = &tile[x][y];
 		if (t->river | (t->terrain == ':') | (t->terrain == ' ') | (t->terrain == '+') ) return;
+		if (t->height <= sealevel) return;
 		t->river = 1;
+		if (t->lowestneigh < 0) {
+			printf("x=%i y=%i height=%i lowestneigh=%i '%c'\n",x,y,t->height,t->lowestneigh,t->terrain);
+			fail("bad lowestneigh");
+		}
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		x = wrap(x + nb[t->lowestneigh].dx, mapx);
 		y = wrap(y + nb[t->lowestneigh].dy, mapy);
 	}
 }
 
-void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy]) {
+void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], short seaheight) {
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
 	for (int i = seatiles; i < mapx*mapy; ++i) tp[i]->river = 0; //Initially, no visible rivers
 	int rivertiles = landtiles * wateronland / 200; //More than 50% river tiles is useless anyway
@@ -1029,13 +1034,13 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy]) {
 	for (int i = seatiles + nonrivers; i < mapx*mapy; ++i) {
 		int x, y;
 		recover_xy(tile, tp[i], &x, &y);
-		run_visible_river(x, y, tile);
+		run_visible_river(x, y, tile, seaheight);
 	}
 	//Start visible rivers from all lake exit tiles:
 	for (int i = 0; i < lakes; ++i) {
 		laketype *l = &lake[i];
 		if (l->merged_into != -1) continue;
-		run_visible_river(l->outflow_x, l->outflow_y, tile);
+		run_visible_river(l->outflow_x, l->outflow_y, tile, seaheight);
 	}
 }
 
@@ -1190,11 +1195,9 @@ It also affect the amount of desert and the forest/jungle allocation. 50 is norm
 
 "wateronland" gives twice the percentage of river tiles. Actual number will be lower, because rivers merge to prevent ugly "river on every tile in the grid". Wateronland also affect the desert/swamp balance, and p/g allocation. 50 is normal
 */
-void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9]) {
+void output0(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9], short seaheight) {
 	int i = mapx*mapy;
-	int surp = 0;
-	short seaheight = sealevel(tp, land, tile, weather, &surp); //Also sorts on height, and sets seatiles and landtiles
-printf("sea surplus output0: %i\n",surp);
+//	short seaheight = sealevel(tp, land, tile, weather, &surp); //Done by caller now
 	int shallowsea = seatiles/3;
 	int deepsea = seatiles - shallowsea;
 
@@ -1285,7 +1288,7 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 #endif
 
 	//Assign the rivers
-	assign_rivers(tp, wateronland, tile);
+	assign_rivers(tp, wateronland, tile, seaheight);
 
   terrain_fixups(tile, tp, seatiles, deepsea, landtiles);
 
@@ -1408,19 +1411,18 @@ Terrain assignment for extended tile set:
 */
 #define d_to_S 0.1
 #define p_to_S 0.3
-void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9]) {
-
+void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9], short seaheight) {
+printf("output1()  seaheight=%i\n",seaheight);
 	int i = mapx * mapy;
 	//Sort on height, determine sea level, correct tile temperatures. Also sets seatiles and landtiles
-	int surp = 0;
-	short seaheight = sealevel(tp, land, tile, weather, &surp);
-printf("output1 sea surplus: %i\n",surp);
+//	short seaheight = sealevel(tp, land, tile, weather, &surp); //done by caller...
+//printf("output1 sea surplus: %i  seaheight: %i\n",surp,seaheight);
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
 	int mountains = highland / 3;
 	int hills = highland - mountains;
-
+printf("seatiles=%i deep=%i highland=%i lowland=%i mountains=%i hills=%i\n",seatiles,deepseatiles,highland,lowland,mountains,hills);
 	float d_part, p_part, g_part, f_part, j_part, s_part, partsum;
 	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
 	//Savanna terrain type 'S'. Hot and dry, but not as dry as desert.
@@ -1434,9 +1436,13 @@ printf("output1 sea surplus: %i\n",surp);
 	//Classify terrain by height, and sometimes temperature
 	int limit, j = 0;
 	//Deep sea or ice
-	for (; j < deepseatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
+	for (; j < deepseatiles; ++j) {
+		tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
+	}
 	//Shallow sea or ice
-	for (; j < seatiles; ++j) tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
+	for (; j < seatiles; ++j) {
+		tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
+	}
 	int firstland = j;
 	//Assign low land
 	for (limit = j + lowland; j < limit; ++j) set(&tp[j]->terrain, 'l');
@@ -1545,7 +1551,7 @@ printf("output1 sea surplus: %i\n",surp);
 	for (; j < limit; ++j) set_tile(tp[j], 's', 'J');
 
 	//Terrain done, set up the rivers
-	assign_rivers(tp, wateronland, tile);
+	assign_rivers(tp, wateronland, tile, seaheight);
 
 	assign_volcanoes(tile, tp, mountains, seatiles);
 
@@ -1895,9 +1901,9 @@ int steepness(short heightdiff) {
 
 	Running into the sea is preferred over merging into another river.
 
-	Also calculate steepness, based on the height difference between this tile and the outflow tile. Steepness is used for erosion, and for deciding how much of the wetness that leaves in the river.
+	Also calculate steepness, based on the height difference between this tile and the next tile. Steepness is used for erosion, and for deciding how much of the wetness that leaves in the river.
 
-	The outflow tile may not be lower than this, if this tile is lower than all neighbours. That is a problem for the caller to solve.
+	The next tile may not be lower than this tile, if this tile is lower than all neighbours. That is a problem for the caller to solve.
 */
 void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheight) {
 	neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
@@ -1929,7 +1935,6 @@ void find_next_rivertile(int x, int y, tiletype tile[mapx][mapy], short seaheigh
 	}
 
 	tile[x][y].lowestneigh = flowlownb;
-
 	/* Don't use height difference underwater */
 	if (flowlowheight < seaheight) flowlowheight = seaheight; 
 
@@ -2202,7 +2207,7 @@ void scatter_rocks(tiletype tile[mapx][mapy], int x, int y, int rocks) {
 //unmarked tiles have unmoved water. marked tiles has a precomputed path for water flow
 void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Iterate through land tiles, prepare waterflow, find river directions, clear marks
-  for (int i = mapx*mapy - 1; (tp[i]->terrain != ':') && (i >= 0); --i) {
+  for (int i = mapx*mapy - 1; (i >= 0) && (tp[i]->terrain != ':'); --i) {
 		tiletype *t = tp[i];
 		//Cancel existing lakes. They get recreated in the next pass, if still viable.
 		//This way, no need to deal with lake trouble when the terrain changes.
@@ -2217,7 +2222,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 		//Find lowest neighbour & steepness.
 		find_next_rivertile(x, y, tile, seaheight); //steepness 0–12
 		/*Less runoff from flat land, more from steeper, most from mountains.
-			Steepness from -1 to 14. 3/(7-steepness/4) yields 4/7, 3/7, 3/6, 3/5, 3/4
+			Steepness from -1 to 14. 3/(7-steepness/4) yields 3/8, 3/7, 3/6, 3/5, 3/4
 		 */
 		t->waterflow = 3*t->wetness / (7 - t->steepness/4);
 		t->wetness -= t->waterflow;
@@ -2549,7 +2554,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//positive: too much sea, neg: too much land. hole plugging and
 	//erosion products filling the sea causes a negative imbalance.
 	int sea_surplus = 0;
-	short seaheight = 0; //later set by sealevel. 0 won't matter, less action the first round.
+	short seaheight = sealevel(tp, land, tile, weather, &sea_surplus);
+	printf("START  sea_surplus=%i  seatiles=%i\n",sea_surplus,seatiles);
 	for (int i = 1; i <= rounds; ++i) {
 
 		//No heightmap changes the LAST round.
@@ -2560,6 +2566,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 											//no, sealevel() re-runs in output, and MUST get the same result.
 			                //may remove if-test, IF we can avoid running sealevel() in output.
 											//i.e. use the established seaheight and sort order. !!!
+											//if-test to be removed, sealevel() purged from output01() !!!
 			//Move the plates
 			for (int p = 0; p < plates; ++p) {
 				platetype *pl = &plate[p];
@@ -2608,6 +2615,9 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//After collecting rocks (from coastal erosion), assume
 			//some current in the direction(s) of prevailing winds. If these directions
 			//leads to sea tiles, move rocks that way.
+#ifdef DBG
+			printf("coastal erosion\n");
+#endif
 
 			for (int i = 0; i < seatiles; ++i) {
 				tiletype *t = tp[i];
@@ -2617,9 +2627,10 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				recover_xy(tile, t, &x, &y);
 				//Look for any coastal neighbours:
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+				int rocks = 0;
 				for (int n = 0; n < neighbours[topo]; ++n) {
 					tiletype *land = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
-					if (land->height <= seaheight) continue; //The tile was not land
+					if (land->height <= seaheight) continue; //That tile was not land
 					//Found a land neighbour.
 					//waves get bigger, if they can build up over a length of sea.
 					//Check for 0,1,2,3 sea neighbours in the opposite direction:
@@ -2642,12 +2653,15 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 //printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
 					land->erosion += wave_erosion;
 					//erode the land tile immediately, get rocks to scatter
-					int rocks = erode(land);
+					rocks += erode(land);
 					if (land->height <= seaheight) ++sea_surplus; //Land was eroded away
-					//Now scatter these rocks:
-					scatter_rocks(tile, x, y, rocks);
 				}
+				//Now scatter these rocks:
+				scatter_rocks(tile, x, y, rocks);
 			}
+#ifdef DBG
+		printf("Deposit moved rocks as sediments, then apply delayed erosion\n");
+#endif
 
 			//Let moved rocks become sediments.
 			//Apply erosion planned the previous round.
@@ -2657,13 +2671,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				int sediment_percent;
 				switch (t->terrain) {
 					case ':': //sea
-						sediment_percent = 90;
+						sediment_percent = 70;
 						break;
 					case '+': //lake
-						sediment_percent = 75;
+						sediment_percent = 50;
 						break;
 					default:
-						sediment_percent = 20; //depend on steepness?
+						sediment_percent = 25; //depend on steepness?
 						break;
 				}
 
@@ -2688,28 +2702,29 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			//We may have too little sea, (neg. surplus) due to sea being filled with eroded rocks
 #ifdef DBG
 		printf("sea_surplus before landslides: %i  seaheight:%i\n", sea_surplus,seaheight);
+
 #endif
 
 			//Landslides to fix negative sea surplus:
 			for (int i = seatiles; i < mapx*mapy && sea_surplus < 0; ++i) {
-				printf(".");
+//printf(".");
 				tiletype *t = tp[i];
 				int x,y;
 				recover_xy(tile, t, &x, &y);
 				if (t->height <= seaheight) continue;
-				printf("L");
+				if (t->lowestneigh == -1) continue;  //May happen if a sea tile was raised
+//printf("L");
 				//Land tile. See if there is sea to slide into:
 				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 				tiletype *tn = &tile[wrap(x+nb[t->lowestneigh].dx, mapx)][wrap(y+nb[t->lowestneigh].dy, mapy)];
 				if (tn->height < seaheight - 2) {
-					printf(",");
+//printf(",");
 					//Keep the seatile sea. Maybe the land tile drowns:
 					short delta = (seaheight - tn->height) / 2;
 					tn->height += delta;
 					t->height -= delta;
-//t->height = seaheight / 2; //stupid FORCING
 					if (t->height <= seaheight) ++sea_surplus;
-				} else printf("*");
+				} //else printf("*");
 			}
 			printf("\n");
 			//!!! MYSTERY
@@ -2732,12 +2747,14 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 		} //if NOT last round
 
+		/*DBG
 int lim = mapx;
 if (mapy < mapx) lim = mapy;
 for (int i = 0; i < lim; ++i) {
 	tiletype *t = &tile[i][i];
 	printf("i:%2i  rocks:%2i  height:%4i  sedim:%4i   %c\n",i,(int)t->rocks,t->height,t->sediments,t->terrain);
 }
+*/
 
 #ifdef DBG
 		printf("sea_surplus before sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
@@ -2746,8 +2763,42 @@ for (int i = 0; i < lim; ++i) {
 		//Terrain changed last round, recompute land/sea and sea level
 		seaheight = sealevel(tp, land, tile, weather, &sea_surplus);  //After this, tp is sorted on height.
 #ifdef DBG
-		printf("sea_surplus after  sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
+		printf("sea_surplus after sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
 #endif
+
+		//Undersea erosion. Some mass flow, sediment from seatiles to deeper seatiles.
+		//Makes more room for land erosion products
+		//Go from deep to shallow, avoid moving the same mass multiple times
+		for (int i = 0; i < seatiles; ++i) {
+			tiletype *t = tp[i];
+			int x, y;
+			recover_xy(tile, t, &x, &y);
+			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+			signed char deep_n = -1;
+			short deepest = 20000; //anything is deeper
+			tiletype *deep_t;
+			for (int n = 0; n < neighbours[topo]; ++n) {
+				tiletype *tn = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
+				if (tn->terrain != ':') continue;
+				if (tn->height < deepest && tn->height < t->height) {
+					deepest = tn->height;
+					deep_n = n;
+					deep_t = tn;
+				}
+			}
+			t->lowestneigh = deep_n;
+			if (deep_n != -1) {
+				//Erode
+				float erosion = (float)(t->height - deep_t->height) / rounds;
+				t->erosion += erosion;
+//printf("undersea erosion: %3.1f  acc: %3.1f  ", erosion, t->erosion);
+				//Move rocks from previous erosion
+//printf("rocks to move: %3.1f\n", t->rocks);
+				deep_t->rocks += t->rocks;
+				t->rocks = 0.0;
+			}
+		}
+
 #ifdef DBG
 		printf("weather, round %i\n",i);
 		printf("evaporation\n");
@@ -2913,9 +2964,9 @@ for (int i = 0; i < lim; ++i) {
 	//print_platemap(tile); //dbg
 	FILE *f = fopen("tergen.sav", "w");
 	if (!tileset) {
-		output0(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air);
+		output0(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air, seaheight);
 	} else {
-		output1(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air);
+		output1(f, land, hillmountain, tempered, wateronland, tile, tp, weather, air, seaheight);
 	}
 	fclose(f);
 }
