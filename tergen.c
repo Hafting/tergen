@@ -500,7 +500,7 @@ int sqdist(int const x1, int const y1, int const x2, int const y2) {
 
 /* Random number in a range (inclusive) */
 float frand(float min, float max) {
-	float range = max - min;
+	double range = max - min;
 	return min + random() * range / RAND_MAX;
 }
 
