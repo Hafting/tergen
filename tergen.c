@@ -332,8 +332,8 @@ typedef struct {
 	short merged_into;        //-1, or id of lake it merged into. Subject to path compression
 } laketype;
 
-#define MAX_LAKES 5000
-#define MAX_PRIQ 100000
+#define MAX_LAKES 15000
+#define MAX_PRIQ 600000
 
 //Globals
 int mapx, mapy; //Map dimensions
