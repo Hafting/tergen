@@ -870,6 +870,27 @@ Plan:
 
 	 */
 
+//print stats for debugging mkworld oddities
+void dbgstats(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], short seaheight,int land) {
+	int sum1=0, sum2=0;
+	int seacnt=0, landcnt=0;
+	for (int i = 0; i < mapx*mapy; ++i) {
+		sum1 += tp[i]->height;
+		if (tp[i]->height <= seaheight) ++seacnt; else ++landcnt;
+	}
+	for (int x=0;x<mapx;++x) for (int y=0;y<mapy;++y) {
+		sum2 += tile[x][y].height;
+	}
+	printf("\nDBGSTATS\n");
+//	printf("tile[][] checksum: %9i\n", sum2);
+//	printf("    tp[] checksum: %9i Had better match exactly\n", sum1);
+	if (sum1  != sum2) fail("Tile height checksum fail, tp[] diverged from tile[][]\n");
+	printf("Average tile height: %6.1f      sea height: %6i\n", (float)sum1/mapx/mapy, seaheight);
+	printf("land cnt:%6i (%2i%%) sea cnt: %6i\n",landcnt, 100*landcnt/mapx/mapy, seacnt);
+  printf("land    :%6i (%2i%%) sea    : %6i  (users request)\n", land*mapx*mapy/100, land, mapx*mapy-land*mapx*mapy/100);
+
+}
+
 //Sorts the tiles on height, determining the sea level because
 //x% of the tiles are sea, so the last sea tile gives the sea height.
 //Also determine tile temperatures based on being sea or land
@@ -880,19 +901,22 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	int tilecnt = mapx*mapy;
 	qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
 	landtiles = land * tilecnt / 100;
-	seatiles = tilecnt - landtiles;
-
-	if (!seatiles) seatiles = 1; //We'll crash with no sea at all. Where would rivers end?
-printf("seatiles init: %6i     ",seatiles);
+	int newseatiles = tilecnt - landtiles;
+	if (!newseatiles) newseatiles = 1; //We'll crash with no sea at all. Where would rivers end?
+	*sea_surplus += (newseatiles-seatiles);
+	seatiles = newseatiles;
+printf("\nseatiles init: %6i   surplus now: %i ",seatiles,*sea_surplus);
 	//seatiles is the number of sea tiles, and index of the first land tile.
 	//Several tiles may have the same height. Move "seatiles" so the first land tile
 	//has higher elevation than the last sea tile. Results in slightly too much sea.
+int numm=0;
 	while (tp[seatiles]->height == tp[seatiles-1]->height) {
 		++seatiles;
 		++*sea_surplus;
+		++numm;
 	}
 	short level = tp[seatiles-1]->height;
-printf("corr1: %6i       ", seatiles);
+printf("corr1: %6i  (%3i added)   ", seatiles, numm);
 	//At this point, we may have some very small pieces of "sea". This is ugly, and
 	//don't happen on real planets.
 	//Find such pieces using a counting depth-first search on every sea tile next
@@ -920,14 +944,71 @@ printf("corr1: %6i       ", seatiles);
 	if (change) {
 		//Re-sort tp[], some heights changed. Determine the last sea tile again
 		qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
+int num=0;
 		while (tp[seatiles-1]->height > level) {
 			--seatiles;
 			--*sea_surplus;
+			++num;
 		}
-printf("corr2: %6i",seatiles);
+printf("corr2: %6i (%3i seatiles removed)  ",seatiles, num);
 	}
-printf("\n");
+	printf("\n");
+	printf("sea_surplus before landslides: %i  seaheight:%i\n", *sea_surplus,level);
 
+	//Landslides to fix negative sea surplus:
+	change = false;
+	for (int i = seatiles; (i < mapx*mapy) && (*sea_surplus < 0); ++i) {
+		//printf(".");
+		tiletype *t = tp[i];
+		int x,y;
+		recover_xy(tile, t, &x, &y);
+		if (t->height <= level) continue;
+		if (t->lowestneigh == -1) continue;  //May happen if a sea tile was raised
+																				 //printf("L");
+																				 //Land tile. See if there is sea to slide into:
+		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+		tiletype *tn = &tile[wrap(x+nb[t->lowestneigh].dx, mapx)][wrap(y+nb[t->lowestneigh].dy, mapy)];
+		if (tn->height < level - 2) {
+			change = true;
+			//printf(",");
+			//Keep the seatile sea. Maybe the land tile drowns:
+			short delta = (level - tn->height) / 2;
+			tn->height += delta;
+			t->height -= delta;
+			t->height=0;//FORCE. Drown the coast tile unconditionally.
+									//Strangely, even such brutalism is not enough? !!!
+									//sea level goes up up up
+			/*
+				 At first, there is small neg. sea surplus. Coast erosion and landslides brings that down to 0. Then sealevel() recreates the neg. surplus. Landslides brings it to 0 again, and sealevel() brings it to a larger negative, always larger!  Sea level fluctuates mildly. When the neg. surplus reaches -300 or so, landslides no longer succeed in reinstating enough sea. After that, sea rises with 30 or so per round, and sea surplus fall with 30 or so.
+
+				 Why do sealevel() make a sea deficit that is worse EVERY TIME?
+				 some mysterious bug?
+
+				 Even when the sea level DROPS due to sea surplus, sealevel() still removes lots of sea tiles. And the number of seatiles removed keep increasing per round too.
+
+			 */
+			if (t->height <= level) {
+				++*sea_surplus;
+			}
+		} //else printf("*");
+	} //landslides
+	printf("sea_surplus after  landslides: %i  seaheight:%i\n", *sea_surplus,level);
+	if (change) {
+		//Re-sort tp[], some heights changed. Determine the last sea tile yet again
+		qsort(tp, tilecnt, sizeof(tiletype *), &q_compare_height);
+int nummm=0;
+		while (tp[seatiles]->height <= level) {
+			++seatiles;
+			++*sea_surplus;
+			++nummm;
+		}
+printf("corr3: %6i (%3i seatiles created)\n",seatiles, nummm);
+
+	}
+
+
+	//give up tracking sea_surplus? Set it to CURRENT situation? !!!
+	*sea_surplus = seatiles - newseatiles;
 	landtiles = tilecnt - seatiles;
 	//Update the temperature array, based on sea or land status
 	//assign sea/land status
@@ -949,7 +1030,6 @@ printf("\n");
 	int half = (neighbours[topo]+2)/2;
 	memset(tmptemp, 0, mapx*mapy*sizeof(signed char));
 	for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-if (tile[x][y].height > level && tile[x][y].lowestneigh == -1) printf("NEG %3i,%3i '%c'\n",x,y,tile[x][y].terrain);//DBG!!!
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int sum = 2 * (int)tile[x][y].temperature;
 		for (int n = 0; n < neighbours[topo]; ++n) {
@@ -973,6 +1053,7 @@ if (tile[x][y].height > level && tile[x][y].lowestneigh == -1) printf("NEG %3i,%
 	}
 	return level;
 }
+//seatiles
 
 //Set a terrain type, unless it is already a lake '+'
 void set(char *t, char ttyp) {
@@ -2554,6 +2635,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//positive: too much sea, neg: too much land. hole plugging and
 	//erosion products filling the sea causes a negative imbalance.
 	int sea_surplus = 0;
+	seatiles = (100-land)*mapx*mapy/100;
 	short seaheight = sealevel(tp, land, tile, weather, &sea_surplus);
 	printf("START  sea_surplus=%i  seatiles=%i\n",sea_surplus,seatiles);
 	for (int i = 1; i <= rounds; ++i) {
@@ -2660,7 +2742,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				scatter_rocks(tile, x, y, rocks);
 			}
 #ifdef DBG
-		printf("Deposit moved rocks as sediments, then apply delayed erosion\n");
+			printf("Deposit moved rocks as sediments, then apply delayed erosion\n");
 #endif
 
 			//Let moved rocks become sediments.
@@ -2699,44 +2781,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 				else if (old_height > seaheight && t->height <= seaheight) ++sea_surplus;
 			} //erosion double loop
 
-			//We may have too little sea, (neg. surplus) due to sea being filled with eroded rocks
-#ifdef DBG
-		printf("sea_surplus before landslides: %i  seaheight:%i\n", sea_surplus,seaheight);
-
-#endif
-
-			//Landslides to fix negative sea surplus:
-			for (int i = seatiles; i < mapx*mapy && sea_surplus < 0; ++i) {
-//printf(".");
-				tiletype *t = tp[i];
-				int x,y;
-				recover_xy(tile, t, &x, &y);
-				if (t->height <= seaheight) continue;
-				if (t->lowestneigh == -1) continue;  //May happen if a sea tile was raised
-//printf("L");
-				//Land tile. See if there is sea to slide into:
-				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-				tiletype *tn = &tile[wrap(x+nb[t->lowestneigh].dx, mapx)][wrap(y+nb[t->lowestneigh].dy, mapy)];
-				if (tn->height < seaheight - 2) {
-//printf(",");
-					//Keep the seatile sea. Maybe the land tile drowns:
-					short delta = (seaheight - tn->height) / 2;
-					tn->height += delta;
-					t->height -= delta;
-t->height=0;//FORCE. Drown the coast tile unconditionally.
-//Strangely, even such brutalism is not enough? !!!
-//sea level goes up up up
-/*
-At first, there is small neg. sea surplus. Coast erosion and landslides brings that down to 0. Then sealevel() recreates the neg. surplus. Landslides brings it to 0 again, and sealevel() brings it to a larger negative, always larger!  Sea level fluctuates mildly. When the neg. surplus reaches -300 or so, landslides no longer succeed in reinstating enough sea. After that, sea rises with 30 or so per round, and sea surplus fall with 30 or so.
-
-Why do sealevel() make a sea deficit that is worse EVERY TIME?
-some mysterious bug?
-
-	 */
-					if (t->height <= seaheight) ++sea_surplus;
-				} //else printf("*");
-			}
-			printf("\n");
 			//!!! MYSTERY
 			//Landslides do NOT turn enough land tiles into sea.  Are ALL neighbour sea tiles too shallow then?
 			//Added that stupid FORCING line. The land tile is drowned unconditionally.
@@ -2752,8 +2796,31 @@ some mysterious bug?
 			//the sea level!  More and more tiles having exactly the same height, and that
 			//same height increases ???
 
-			//Are they adding more sediment everywhere, every round ???
+			//Are they adding more sediment everywhere, every round ??? nope
 
+			//fixed a bug with sea tracking. The sea still keep rising, with lots of plugging.
+			//Terrain full of lakes, but not totally weird.
+
+			//Another attempt: RESET sea_surplus at the end of sealevel(). No tracking, just
+			//too little/too much according to the goal.
+			//The sea level seems more stable, as long as landslides keeps up with sea_surplus.
+			//sealevel() removes more seatiles for each round.
+			// possibly, landslides around inclusions, then the inclusions+slide sites get filled?
+			// possible fix: fill inclusions. Then, landslides immediately _after_ that.
+			// but mystery: why do seatiles() remove so many seatiles, when the sealevel go DOWN?
+			// can erosion bring the middle of an island under the current sea level ??? That would
+			// be a lot of lakes, and that is what we see...
+			//when landslides no longer keep up with sealevel() removing sea tiles, the sea rises a lot.
+
+			//Attempt: Landslides AFTER sealevel(). Actually, inside sealevel() immediately
+			//after the plugging of holes.
+
+
+			//Fixes, once the main problem is solved:
+			// * Remove any unnecessary sea_surplus tracking
+			// * Landslides has an =0 hack, remove that
+			// * Coastal erosion may be too strong? Check a bit.
+			// * Too much mass transport underwater?  Check it.
 
 		} //if NOT last round
 
@@ -2769,12 +2836,14 @@ for (int i = 0; i < lim; ++i) {
 #ifdef DBG
 		printf("sea_surplus before sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
 #endif
+dbgstats(tile, tp,seaheight,land);
 
 		//Terrain changed last round, recompute land/sea and sea level
 		seaheight = sealevel(tp, land, tile, weather, &sea_surplus);  //After this, tp is sorted on height.
 #ifdef DBG
 		printf("sea_surplus after sealevel(): %i  seaheight:%i\n", sea_surplus,seaheight);
 #endif
+dbgstats(tile,tp,seaheight,land);
 
 		//Undersea erosion. Some mass flow, sediment from seatiles to deeper seatiles.
 		//Makes more room for land erosion products
