@@ -1069,11 +1069,18 @@ laketype lake[MAX_LAKES];
 	New approach for assigning rivers:
 	a. sort tiles on waterflow
 	b. set all tiles to "no river"
-	c. start at every tile with enough flow. Run a visible river, stopping only when
-	   reaching sea, lake, or an already made river.
-		 This solves (1) above
-	d. also start at every lake outflow tile. Run a visible river from there. Solves (2) above.
-	The only riverless lakes after this, will be pieces of converted sea.
+	c. start at every tile with enough flow. Run a visible river, stopping only when reaching sea, lake, or an already made river.
+	   Result: all rivers reaches the sea
+	d. also start at every lake outflow tile. Run a visible river from there.
+	   Result: all lakes have a river to the sea
+
+The weather simulation makes lakes even where there is very little waterflow. Some lakes should therefore be removed, but in a nondisruptive and simple way.
+
+	a. lakes of size 1 is kept, only if they start a river. Otherwise, they get deleted.
+	b. "small" lakes are deleted, if the outflow tile has too little water for running a river. "Small" means a lake where all lake tiles are adjacent to the outflow tile.
+	Safe deletion of a lake: lake tiles are set to the same height, wetness and waterflow as the outflow tile. These tiles also get the outflow tile as their next rivertile. Lake status is withdrawn. It is now safe, even if a river appear there for other reasons. This happens after terrain generation, so set the same freeciv terrain as the outflow tile.
+
+
 	 */
 
 //Run a single river to the sea/a lake/another river
@@ -1098,6 +1105,13 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 	for (int i = seatiles; i < mapx*mapy; ++i) tp[i]->river = 0; //Initially, no visible rivers
 	int rivertiles = landtiles * wateronland / 200; //More than 50% river tiles is useless anyway
 	int nonrivers = landtiles - rivertiles;
+	//Find the exact minimum waterflow for rivers:
+	while (tp[seatiles+nonrivers]->waterflow == tp[seatiles+nonrivers-1]->waterflow) {
+		++nonrivers;
+		--rivertiles;
+	}
+	int min_waterflow = tp[seatiles+nonrivers]->waterflow;
+
 	//Start visible rivers from all high-flow tiles:
 	for (int i = seatiles + nonrivers; i < mapx*mapy; ++i) {
 		int x, y;
