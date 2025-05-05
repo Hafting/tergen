@@ -3,17 +3,17 @@
 		Simulates planet creation, plate tectonics, weather & erosion,
 		hoping to arrive at interesting or realistic terrains.
 
-		Inputs:
-		map size (x,y)              64,64
-		land percentage             30
-		hill/mountain percentage    30
-		tempered percentage         60
-		water on land percentage    50
+		Inputs:                     Default     Minimum
+		Name string
+		topology
+		wrap
+		map size (x y)              64 128        16 16
+		random seed
+		land percentage             33                1
+		hill/mountain percentage    30                0
+		tempered percentage         50                0
+		water on land percentage    50                1
 
-		Later:
-		wrap EW                     y
-		wrap NS                     
-    hexagonal
 */
 
 /*
@@ -354,26 +354,15 @@ int airheight[9] = {50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000};
 int rounds;
 
 /*  odd & even neighbour arrays for the topologies  */
-//neighbourtype n0o[] = {{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{-1,1},{1,-1},{1,1}};
-//neighbourtype n0e[] = {{-1,0},{1,0},{0,-1},{0,1},{-1,-1},{-1,1},{1,-1},{1,1}};
 
 neighbourtype n0o[] = {{0,1},{1,1},{1,0},{-1,1},{-1,0},{-1,-1},{0,-1},{1,-1}};
 neighbourtype n0e[] = {{0,1},{1,1},{1,0},{-1,1},{-1,0},{-1,-1},{0,-1},{1,-1}};
 
-//neighbourtype n1o[] = {{ 0,-1},{1,-1},{ 0,1},{1, 1},{0,-2},{-1,0},{0,2},{0,1}};
-//neighbourtype n1e[] = {{-1,-1},{0,-1},{-1,1},{0, 1},{0,-2},{-1,0},{0,2},{0,1}};
-
 neighbourtype n1o[] = {{0,1},{1, 1},{0,2},{ 0,1},{-1,0},{ 0,-1},{0,-2},{1,-1}};
 neighbourtype n1e[] = {{0,1},{0, 1},{0,2},{-1,1},{-1,0},{-1,-1},{0,-2},{0,-1}};
 
-//neighbourtype n2o[] = {{ 0,-1},{1,-1},{-1,0},{1,0},{ 0,1},{1,1}};
-//neighbourtype n2e[] = {{-1,-1},{0,-1},{-1,0},{1,0},{-1,1},{0,1}};
-
 neighbourtype n2o[] = {{ 1, 0},{ 1, 1},{ 0, 1},{-1, 0},{ 0,-1},{ 1,-1}};
 neighbourtype n2e[] = {{ 1, 0},{ 0, 1},{-1, 1},{-1, 0},{-1,-1},{ 0,-1}};
-
-//neighbourtype n3o[] = {{0,-2},{ 0,-1},{1,-1},{ 0,1},{1,1},{0,2}};
-//neighbourtype n3e[] = {{0,-2},{-1,-1},{0,-1},{-1,1},{0,1},{0,2}};
 
 neighbourtype n3o[] = {{1,1},{0,2},{ 0,1},{ 0,-1},{0,-2},{1,-1}};
 neighbourtype n3e[] = {{0,1},{0,2},{-1,1},{-1,-1},{0,-2},{0,-1}};
@@ -382,16 +371,9 @@ neighbourtype *nodd[4] = {n0o, n1o, n2o, n3o};
 neighbourtype *nevn[4] = {n0e, n1e, n2e, n3e};
 
 /*  geometric position of neighbour tiles for the topologies  */
-//neighpostype np0[8] = {{180},{90},{270},{0},{225},{135},{315},{45}};
 neighpostype np0[8] = {{0},{45},{90},{135},{180},{225},{270},{315}};
-
-//neighpostype np1[8] = {{225},{315},{135},{45},{270},{180},{90},{0}};
 neighpostype np1[8] = {{0},{45},{90},{135},{180},{225},{270},{315}};
-
-//neighpostype np2[6] = {{240},{300},{180},{  0},{120},{ 60}};
 neighpostype np2[6] = {{  0},{ 60},{120},{180},{240},{300}};
-
-//neighpostype np3[6] = {{270},{210},{330},{150},{ 30},{ 90}};
 neighpostype np3[6] = {{ 30},{ 90},{150},{210},{270},{330}};
 
 neighpostype *nposition[4] = {np0, np1, np2, np3};
@@ -448,7 +430,7 @@ int asteroidx[4] = {7, 5, 7, 4};     //columns in strike map
 int asteroidy[4] = {7, 9, 7, 13};    //rows in strike map
 int asteroid_yadj[4] = {0, 2, 1, 2}; //0: any y, 1: odd y, 2: even y
 
-
+//Mostly for debugging, abort with an error message
 void fail(char *s) {
 	printf("%s\n", s);
 	exit(1);
@@ -872,7 +854,7 @@ Plan:
 3. Implement landslide corrections, tune
 4. Comment out debug printouts, but keep them. Planned changes to erosion may need re-tuning
 
-	 */
+*/
 
 //print stats for debugging mkworld oddities
 void dbgstats(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], short seaheight,int land) {
@@ -914,7 +896,6 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 	//has higher elevation than the last sea tile. Results in slightly too much sea,
 	//but clean sea/land separation on height.
 	while (tp[seatiles]->height == tp[seatiles-1]->height) ++seatiles;
-
 
 	short level = tp[seatiles-1]->height;
 	//At this point, we may have some very small pieces of "sea". This is ugly, and
@@ -1064,7 +1045,6 @@ void set_parts(int tempered, int wateronland, float *dp, float *pp, float *gp, f
 int lakes;
 laketype lake[MAX_LAKES];
 
-
 /*
 	New approach for assigning rivers:
 	a. sort tiles on waterflow
@@ -1079,9 +1059,7 @@ The weather simulation makes lakes even where there is very little waterflow. So
 	a. lakes of size 1 is kept, only if they start a river. Otherwise, they get deleted.
 	b. "small" lakes are deleted, if the outflow tile has too little water for running a river. "Small" means a lake where all lake tiles are adjacent to the outflow tile.
 	Safe deletion of a lake: lake tiles are set to the same height, wetness and waterflow as the outflow tile. These tiles also get the outflow tile as their next rivertile. Lake status is withdrawn. It is now safe, even if a river appear there for other reasons. This happens after terrain generation, so set the same freeciv terrain as the outflow tile.
-
-
-	 */
+*/
 
 //Run a single river to the sea/a lake/another river
 void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel) {
@@ -1100,6 +1078,63 @@ void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel) 
 	}
 }
 
+//Lookup function for a lake's lake id. The lake may be merged into a second lake,
+//which may be merged into a third, and so on. Resolve this, and use
+//path compression for speeding up future lookups
+int lake_id(int lake_number) {
+	laketype *l = &lake[lake_number];
+	if (l->merged_into == -1) return lake_number;
+	l->merged_into = lake_id(l->merged_into);
+	return l->merged_into;
+}
+
+//Lookup function for a tile's lake ix.
+//automatically corrects lake_ix if the lake was merged earlier.
+//Must be used instead of accessing tiletype->lake_ix directly, except for lake_merge()
+int lookup_lake_ix(tiletype *t) {
+	if (t->lake_ix != -1) t->lake_ix = lake_id(t->lake_ix);
+	return t->lake_ix;
+}
+
+
+//Attempt deleting a dry lake. It is known that the waterflow is too small for a river.
+//Deletion is easy if all lake tiles borders the outflow tile
+void try_del_lake(tiletype tile[mapx][mapy], laketype *l) {
+	if (l->tiles > neighbours[topo]) return; //This lake is too big
+	//count lake tiles (belonging to l) next to the outflow tile:
+	neighbourtype *nb = (l->outflow_y & 1) ? nodd[topo] : nevn[topo];
+	int cnt = 0;
+	for (int n = 0; n < neighbours[topo]; ++n) {
+		int nx = wrap(l->outflow_x + nb[n].dx, mapx);
+		int ny = wrap(l->outflow_y + nb[n].dy, mapy);
+		tiletype *t = &tile[nx][ny];
+		cnt += ( (t->terrain == '+') && (lookup_lake_ix(t) == (l - lake)) );
+	}
+	if (cnt != l->tiles) return; //Lake is not small/simple, so keep it
+	//Lake is small (and dry) so delete it
+printf("DEL lake %3i size %i:   ", l-lake,l->tiles);
+	l->tiles = 0;
+	tiletype *t = &tile[l->outflow_x][l->outflow_y];
+	//Remove neighbours from the lake:
+	for (int n = 0; n < neighbours[topo]; ++n) {
+		int nx = wrap(l->outflow_x + nb[n].dx, mapx);
+		int ny = wrap(l->outflow_y + nb[n].dy, mapy);
+		tiletype *tn = &tile[nx][ny];
+		if (tn->terrain != '+') continue;
+printf("%3i ", lookup_lake_ix(tn));
+		if (lookup_lake_ix(tn) == (l - lake)) { //Tile is in this lake
+			tn->lake_ix = -1;
+			tn->waterflow = t->waterflow;
+			tn->height = t->height;
+			tn->terrain = t->terrain;
+			tn->wetness = t->wetness;
+			//Opposite direction, points from tn to t:
+			tn->lowestneigh = (n + neighbours[topo]/2) % neighbours[topo];
+		}
+	}
+printf("\n");
+}
+
 void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], short seaheight) {
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
 	for (int i = seatiles; i < mapx*mapy; ++i) tp[i]->river = 0; //Initially, no visible rivers
@@ -1112,16 +1147,32 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 	}
 	int min_waterflow = tp[seatiles+nonrivers]->waterflow;
 
+	//Find and delete small or dry lakes:
+	for (int i = 0; i < lakes; ++i) {
+		laketype *l = &lake[i];
+		if (l->merged_into != -1) continue; //Skip merged lakes
+		tiletype *out = &tile[l->outflow_x][l->outflow_y];
+		//Rule 1: delete "dry" lakes, if possible  DEL 84. all deletable: 226
+		//"dry" plus all size 1: 215
+		//next attempt: "dry" and all deletables, except those with no incoming river.
+		//!!!look at waterflow in the lake's priq, to see if there will be incoming rivers !!!
+		//might get a little better, keep some lakes that start rivers.
+		if (out->waterflow < min_waterflow) try_del_lake(tile, l);
+		else if (l->tiles == 1) try_del_lake(tile, l);
+	}
+
 	//Start visible rivers from all high-flow tiles:
 	for (int i = seatiles + nonrivers; i < mapx*mapy; ++i) {
 		int x, y;
 		recover_xy(tile, tp[i], &x, &y);
 		run_visible_river(x, y, tile, seaheight);
 	}
+
 	//Start visible rivers from all lake exit tiles:
 	for (int i = 0; i < lakes; ++i) {
 		laketype *l = &lake[i];
-		if (l->merged_into != -1) continue;
+		if (l->merged_into != -1) continue; //skip merged lakes
+		if (!l->tiles) continue; //skip deleted lakes
 		run_visible_river(l->outflow_x, l->outflow_y, tile, seaheight);
 	}
 }
@@ -1329,7 +1380,6 @@ if (tp[j]->temperature < T_GLACIER) tp[j]->terrain = 'a';
 		}
 		t->relative_wetness = (float)t->wetness / cloudcap;
 	}
-
 
 	//Sort firsttempered to firsthill on wetness,
 	//divide into desert, plain, grass, forest, jungle, swamp
@@ -2095,24 +2145,6 @@ tiletype *minfrom_priq(laketype *l) {
 	return ret;
 }
 
-//Lookup function for a lake's lake id. The lake may be merged into a second lake,
-//which may be merged into a third, and so on. Resolve this, and use
-//path compression for speeding up future lookups
-int lake_id(int lake_number) {
-	laketype *l = &lake[lake_number];
-	if (l->merged_into == -1) return lake_number;
-	l->merged_into = lake_id(l->merged_into);
-	return l->merged_into;
-}
-
-//Lookup function for a tile's lake ix.
-//automatically corrects lake_ix if the lake was merged earlier.
-//Must be used instead of accessing tiletype->lake_ix directly, except for lake_merge()
-int lookup_lake_ix(tiletype *t) {
-	if (t->lake_ix != -1) t->lake_ix = lake_id(t->lake_ix);
-	return t->lake_ix;
-}
-
 
 /*
   Lake merge process:
@@ -2203,7 +2235,7 @@ void mk_lake(int x, int y, tiletype tile[mapx][mapy], int river_serial) {
 			//Same-height tiles may instead add to the lake later
 
 			//if == best_h, select only if it is a lake with different river serial
-			//Some land tiles and some sea tiles may have the same height. So test for sea tiles.
+			//Sea tiles are always lower than land tiles.
 
 
 			if ( (nnheight < best_h) || (tnn->terrain == ':') || ( (tnn->terrain == '+') && (lake[lookup_lake_ix(tnn)].river_serial != river_serial)) ) {
@@ -2368,6 +2400,7 @@ void run_rivers(short seaheight, tiletype tile[mapx][mapy], tiletype *tp[mapx*ma
 				x = l->outflow_x;
 				y = l->outflow_y;
 				t = &tile[x][y];
+
 				from_height = l->height;
 			}
 		} while (t->terrain != ':');
