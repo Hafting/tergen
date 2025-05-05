@@ -820,7 +820,7 @@ The need for coast erosion.
 
 Terrain then turns very strange in both cases. The reason is that sea is turned into land.
 Either by hole-filling, or by erosion products filling the sea at river mouths.
-The problem aries because the user have specified a certain land/sea ratio, such as 30% land
+The problem arises because the user have specified a certain land/sea ratio, such as 30% land
 (and 70% sea). When sea is filled in, this is compensated by a rising sea level which turn
 an appropriate amount of land tiles into sea.  Unfortunately, some of these tiles will be
 in the middle of continents, so hole-filling just create new holes. This repeats on each
@@ -847,12 +847,6 @@ The best solution may involve a combination:
 
 3. Too much sea should not happen. If it happens, tune it out with less coastal erosion.
    May need testing: worlds with 5%, 20% 50% 70% 95% sea...
-
-Plan:
-1. Track the land/sea imbalance, debug printouts
-2. Implement wave-based coastal erosion
-3. Implement landslide corrections, tune
-4. Comment out debug printouts, but keep them. Planned changes to erosion may need re-tuning
 
 */
 
@@ -1715,7 +1709,7 @@ void mountaincheck(int x, int y, int direction, tiletype tile[mapx][mapy]) {
 	}
 }
 
-//pl: a textonic plate. direction: index into neighbour arrays 
+//pl: a tectonic plate. direction: index into neighbour arrays
 //moves the plate's tiles in that direction, effecting terrain changes
 //move tiles in a suitable order, so this plate's tiles can be overwritten
 //as the previous was moved in a earlier step. (Leading before trailing tiles)
