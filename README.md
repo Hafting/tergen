@@ -106,8 +106,8 @@ To see all of a map without playing through the game first, use edit mode and be
 - May  2025: Much work on erosion, lakes and sea level. All rivers should reach the sea now.
 - Apr. 2025: Use relative wetness for assigning terrain types. Better placement of deserts
 - Apr. 2025: Support for savanna terrain type, which appeared in freeciv 3.1
-- Apr. 2025: Added big lakes to the river/waterflow simulation
-. Mar. 2025: Improved plate tectonics, thicker mountain ranges, plate boundaries less obvious.
+- Apr. 2025: Added big lakes to the river/waterflow simulation.
+- Mar. 2025: Improved plate tectonics, thicker mountain ranges, plate boundaries less obvious.
 - Mar. 2025: Asteroid strikes, cusing occational circular craters
 - Mar. 2025: Volcanoes now appear on tectonic plate edges only
 - Nov. 2023: tergen works for all freeciv topologies
