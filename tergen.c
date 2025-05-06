@@ -958,7 +958,6 @@ short sealevel(tiletype *tp[mapx*mapy], int land, tiletype tile[mapx][mapy], wea
 		}
 	} //landslides
 #ifdef DBG
-	printf("mass balance: %i\n",mass_balance);
 	printf("sea surplus after landslides: %i\n", seatiles -  goal_seatiles);
 #endif
 	if (change) {
@@ -1108,7 +1107,6 @@ void try_del_lake(tiletype tile[mapx][mapy], laketype *l) {
 	}
 	if (cnt != l->tiles) return; //Lake is not small/simple, so keep it
 	//Lake is small (and dry) so delete it
-printf("DEL lake %3i size %i:   ", l-lake,l->tiles);
 	l->tiles = 0;
 	tiletype *t = &tile[l->outflow_x][l->outflow_y];
 	//Remove neighbours from the lake:
@@ -1117,7 +1115,6 @@ printf("DEL lake %3i size %i:   ", l-lake,l->tiles);
 		int ny = wrap(l->outflow_y + nb[n].dy, mapy);
 		tiletype *tn = &tile[nx][ny];
 		if (tn->terrain != '+') continue;
-printf("%3i ", lookup_lake_ix(tn));
 		if (lookup_lake_ix(tn) == (l - lake)) { //Tile is in this lake
 			tn->lake_ix = -1;
 			tn->waterflow = t->waterflow;
@@ -1128,7 +1125,6 @@ printf("%3i ", lookup_lake_ix(tn));
 			tn->lowestneigh = (n + neighbours[topo]/2) % neighbours[topo];
 		}
 	}
-printf("\n");
 }
 
 //Counts the rivers going into a lake, by counting edge tiles
@@ -1141,7 +1137,6 @@ int cnt_incoming_rivers(laketype *l, int min_waterflow, tiletype *out) {
 		if (t == out) continue; //Skip the outflow tile
 		cnt += (t->waterflow >= min_waterflow);
 	}
-	printf("in-river cnt= %i\n", cnt);
 	return cnt;
 }
 
@@ -1565,14 +1560,12 @@ Terrain assignment for extended tile set:
 #define d_to_S 0.1
 #define p_to_S 0.3
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9], short seaheight) {
-printf("output1()  seaheight=%i\n",seaheight);
 	int i = mapx * mapy;
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
 	int mountains = highland / 3;
 	int hills = highland - mountains;
-printf("seatiles=%i deep=%i highland=%i lowland=%i mountains=%i hills=%i\n",seatiles,deepseatiles,highland,lowland,mountains,hills);
 	float d_part, p_part, g_part, f_part, j_part, s_part, partsum;
 	set_parts(tempered, wateronland, &d_part, &p_part, &g_part, &f_part, &j_part, &s_part, &partsum);
 	//Savanna terrain type 'S'. Hot and dry, but not as dry as desert.
@@ -2689,155 +2682,144 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	short seaheight = sealevel(tp, land, tile, weather);
 	for (int i = 1; i <= rounds; ++i) {
 
-		//No heightmap changes the LAST round.
-		//This prevents sealevel changes that could leave rivers stopped
-		//before the coast, or drown the edge between a lake and the sea.
-		if (i < rounds) { //Allow height changes from tectonics/erosion/deposits
-                      //needed? river/lakes happens LATER, might fix itself?
-											//no, sealevel() re-runs in output, and MUST get the same result.
-			                //may remove if-test, IF we can avoid running sealevel() in output.
-											//i.e. use the established seaheight and sort order. !!!
-											//if-test to be removed, sealevel() purged from output01() !!!
-			//Move the plates
-			for (int p = 0; p < plates; ++p) {
-				platetype *pl = &plate[p];
-				pl->cx += pl->vx;
-				pl->cy += pl->vy;
-				//Is the plate now closer to some neighbour tile, than the old center?
-				float dx = pl->ocx - pl->cx;
-				float dy = pl->ocy - pl->cy;
-				float sqdisto = dx*dx+dy*dy;
-				//Find the closest, if any
-				float sqdist_best = sqdisto;
-				int nearest_n = -1;
+		//Move the plates
+		for (int p = 0; p < plates; ++p) {
+			platetype *pl = &plate[p];
+			pl->cx += pl->vx;
+			pl->cy += pl->vy;
+			//Is the plate now closer to some neighbour tile, than the old center?
+			float dx = pl->ocx - pl->cx;
+			float dy = pl->ocy - pl->cy;
+			float sqdisto = dx*dx+dy*dy;
+			//Find the closest, if any
+			float sqdist_best = sqdisto;
+			int nearest_n = -1;
 
-				for (int n = neighbours[topo]; n--;) {
-					neighpostype *neigh = np+n;
-					dx = pl->ocx + neigh->dx - pl->cx;
-					dy = pl->ocy + neigh->dy - pl->cy;
-					float sqdistn = dx*dx+dy*dy;
-					if ((sqdistn < sqdisto) && (sqdistn < sqdist_best)) {
-						//Find the best plate move, if any.
-						sqdist_best = sqdistn;
-						nearest_n = n;
-					}
+			for (int n = neighbours[topo]; n--;) {
+				neighpostype *neigh = np+n;
+				dx = pl->ocx + neigh->dx - pl->cx;
+				dy = pl->ocy + neigh->dy - pl->cy;
+				float sqdistn = dx*dx+dy*dy;
+				if ((sqdistn < sqdisto) && (sqdistn < sqdist_best)) {
+					//Find the best plate move, if any.
+					sqdist_best = sqdistn;
+					nearest_n = n;
 				}
-				if (nearest_n > -1) {
-					//Move the plate in direction of the closest neighbour tile
-					moveplate(pl, nearest_n, tile);
-					pl->ocx += np[nearest_n].dx;
-					pl->ocy += np[nearest_n].dy;
-				}
-
 			}
-			/* Run weather & erosion */
-
-			/* Asteroid strikes */
-			if (asteroids && !(random() % (mapx/16)) ) {
-				--asteroids;
-				asteroid_strike(tile);
+			if (nearest_n > -1) {
+				//Move the plate in direction of the closest neighbour tile
+				moveplate(pl, nearest_n, tile);
+				pl->ocx += np[nearest_n].dx;
+				pl->ocy += np[nearest_n].dy;
 			}
 
-			//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
-			//More erosion if there are several ocean tiles in the opposite direction, as
-			//waves will build up over distance. More erosion if the direction coincides with
-			//prevailing wind, and of course more if that wind is stronger.
+		}
+		/* Run weather & erosion */
 
-			//After collecting rocks (from coastal erosion), assume
-			//some current in the direction(s) of prevailing winds. If these directions
-			//leads to sea tiles, move rocks that way.
+		/* Asteroid strikes */
+		if (asteroids && !(random() % (mapx/16)) ) {
+			--asteroids;
+			asteroid_strike(tile);
+		}
+
+		//Beach/coastal erosion. For each ocean tile, find any neighbouring land tiles
+		//More erosion if there are several ocean tiles in the opposite direction, as
+		//waves will build up over distance. More erosion if the direction coincides with
+		//prevailing wind, and of course more if that wind is stronger.
+
+		//After collecting rocks (from coastal erosion), assume
+		//some current in the direction(s) of prevailing winds. If these directions
+		//leads to sea tiles, move rocks that way.
 #ifdef DBG
-			printf("coastal erosion\n");
+		printf("coastal erosion\n");
 #endif
 
-			for (int i = 0; i < seatiles; ++i) {
-				tiletype *t = tp[i];
+		for (int i = 0; i < seatiles; ++i) {
+			tiletype *t = tp[i];
 
-				if (t->height > seaheight) continue; //Tectonics or asteroid disturbed the heightmap
-				int x,y;
-				recover_xy(tile, t, &x, &y);
-				//Look for any coastal neighbours:
-				neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
-				int rocks = 0;
-				for (int n = 0; n < neighbours[topo]; ++n) {
-					tiletype *land = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
-					if (land->height <= seaheight) continue; //That tile was not land
-					//Found a land neighbour.
-					//waves get bigger, if they can build up over a length of sea.
-					//Check for 0,1,2,3 sea neighbours in the opposite direction:
-					int anti_n = (n + (neighbours[topo] / 2)) % neighbours[topo];
-					int strength = 1;
-					int mx = x, my = y;
-					for (int m = 0; m < 3; ++m) {
-						neighbourtype *mb = (my & 1) ? nodd[topo] : nevn[topo];
-						mx = wrap(mx+mb[anti_n].dx,mapx);
-						my = wrap(my+mb[anti_n].dy,mapy);
-						if (tile[mx][my].terrain != ':') break;
-						++strength;
-					}
-					//Have 1,2,3 or 4 (length) sea tiles for building waves against the "land" tile.
-					//Check if it coincides with prevailing wind:
-					if (weather[x][y].prevailing1 == n || weather[x][y].prevailing2 == n) strength *= (weather[x][y].prevailing_strength + 1);
-					//Have an erosion strength from 1 to 16
-					//Correct for number of turns:
-					float wave_erosion = 50.0 * strength / rounds;
-//printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
-					land->erosion += wave_erosion;
-					//erode the land tile immediately, get rocks to scatter
-					rocks += erode(land);
+			if (t->height > seaheight) continue; //Tectonics or asteroid disturbed the heightmap
+			int x,y;
+			recover_xy(tile, t, &x, &y);
+			//Look for any coastal neighbours:
+			neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
+			int rocks = 0;
+			for (int n = 0; n < neighbours[topo]; ++n) {
+				tiletype *land = &tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)];
+				if (land->height <= seaheight) continue; //That tile was not land
+																								 //Found a land neighbour.
+																								 //waves get bigger, if they can build up over a length of sea.
+																								 //Check for 0,1,2,3 sea neighbours in the opposite direction:
+				int anti_n = (n + (neighbours[topo] / 2)) % neighbours[topo];
+				int strength = 1;
+				int mx = x, my = y;
+				for (int m = 0; m < 3; ++m) {
+					neighbourtype *mb = (my & 1) ? nodd[topo] : nevn[topo];
+					mx = wrap(mx+mb[anti_n].dx,mapx);
+					my = wrap(my+mb[anti_n].dy,mapy);
+					if (tile[mx][my].terrain != ':') break;
+					++strength;
 				}
-				//Now scatter these rocks:
-				scatter_rocks(tile, x, y, rocks);
+				//Have 1,2,3 or 4 (length) sea tiles for building waves against the "land" tile.
+				//Check if it coincides with prevailing wind:
+				if (weather[x][y].prevailing1 == n || weather[x][y].prevailing2 == n) strength *= (weather[x][y].prevailing_strength + 1);
+				//Have an erosion strength from 1 to 16
+				//Correct for number of turns:
+				float wave_erosion = 50.0 * strength / rounds;
+				//printf("tile erosion:%4.1f  wave erosion:%4.1f\n", land->erosion, wave_erosion);
+				land->erosion += wave_erosion;
+				//erode the land tile immediately, get rocks to scatter
+				rocks += erode(land);
 			}
+			//Now scatter these rocks:
+			scatter_rocks(tile, x, y, rocks);
+		}
 #ifdef DBG
-			printf("Deposit moved rocks as sediments, then apply delayed erosion\n");
+		printf("Deposit moved rocks as sediments, then apply delayed erosion\n");
 #endif
 
-			//Let moved rocks become sediments.
-			//Apply erosion planned the previous round.
-			for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
-				tiletype *t = &tile[x][y];
-				short old_height = t->height;
-				int sediment_percent;
-				switch (t->terrain) {
-					case ':': //sea
-						sediment_percent = 70;
-						break;
-					case '+': //lake
-						sediment_percent = 50;
-						break;
-					default:
-						sediment_percent = 25; //depend on steepness?
-						break;
-				}
+		//Let moved rocks become sediments.
+		//Apply erosion planned the previous round.
+		for (int x = 0; x < mapx; ++x) for (int y = 0; y < mapy; ++y) {
+			tiletype *t = &tile[x][y];
+			short old_height = t->height;
+			int sediment_percent;
+			switch (t->terrain) {
+				case ':': //sea
+					sediment_percent = 70;
+					break;
+				case '+': //lake
+					sediment_percent = 50;
+					break;
+				default:
+					sediment_percent = 25; //depend on steepness?
+					break;
+			}
 
-				//Some loose rocks becomes sediments:
-				int rocks = t->rocks * sediment_percent / 100;
-				t->height += rocks;
-				t->sediments += rocks;
-				t->rocks -= rocks;
+			//Some loose rocks becomes sediments:
+			int rocks = t->rocks * sediment_percent / 100;
+			t->height += rocks;
+			t->sediments += rocks;
+			t->rocks -= rocks;
 
-				//Apply any deferred erosion, terrain becomes loose rocks:
-				//Sediments erode 3x more than solid rock:
+			//Apply any deferred erosion, terrain becomes loose rocks:
+			//Sediments erode 3x more than solid rock:
 
-				rocks = erode(t);
-				t->rocks += rocks;
+			rocks = erode(t);
+			t->rocks += rocks;
 
-			} //erosion double loop
+		} //erosion double loop
 
-			//Fix for weird terrain: Landslides AFTER sealevel().
-			//Actually, inside sealevel() immediately after the plugging of holes.
-			//Works, if the landslides are able to prevent a rising sea.
+		//Fix for weird terrain: Landslides AFTER sealevel().
+		//Actually, inside sealevel() immediately after the plugging of holes.
+		//Works, if the landslides are able to prevent a rising sea.
 
-
-		} //if NOT last round
 #ifdef DBG
-		dbgstats(tile, tp,seaheight,land);
+		//dbgstats(tile, tp,seaheight,land);
 #endif
 		//Terrain changed last round, recompute land/sea and sea level
 		seaheight = sealevel(tp, land, tile, weather);  //After this, tp is sorted on height.
 #ifdef DBG
-		dbgstats(tile,tp,seaheight,land);
+		//dbgstats(tile,tp,seaheight,land);
 #endif
 		//Undersea erosion. Some mass flow, sediment from seatiles to deeper seatiles.
 		//Makes more room for land erosion products
