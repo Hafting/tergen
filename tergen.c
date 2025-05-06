@@ -1091,8 +1091,10 @@ int lookup_lake_ix(tiletype *t) {
 }
 
 
-//Attempt deleting a dry lake. It is known that the waterflow is too small for a river.
-//Deletion is easy if all lake tiles borders the outflow tile
+//Attempt to delete a lake, for whatever reason.
+//Deletion is easy if all lake tiles borders the outflow tile:
+//Change lake tiles to outflow terrain, and make the outflow tile
+//the next rivertile for all of them. In case a river appear later.
 void try_del_lake(tiletype tile[mapx][mapy], laketype *l) {
 	if (l->tiles > neighbours[topo]) return; //This lake is too big
 	//count lake tiles (belonging to l) next to the outflow tile:
@@ -1129,6 +1131,20 @@ printf("%3i ", lookup_lake_ix(tn));
 printf("\n");
 }
 
+//Counts the rivers going into a lake, by counting edge tiles
+//having minimum waterflow or more.
+int cnt_incoming_rivers(laketype *l, int min_waterflow, tiletype *out) {
+	int cnt = 0;
+	int len = l->priq_len;
+  while (len--) {
+		tiletype *t = l->priq[len];
+		if (t == out) continue; //Skip the outflow tile
+		cnt += (t->waterflow >= min_waterflow);
+	}
+	printf("in-river cnt= %i\n", cnt);
+	return cnt;
+}
+
 void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], short seaheight) {
 	qsort(tp + seatiles, landtiles, sizeof(tiletype *), &q_compare_waterflow);
 	for (int i = seatiles; i < mapx*mapy; ++i) tp[i]->river = 0; //Initially, no visible rivers
@@ -1141,18 +1157,29 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 	}
 	int min_waterflow = tp[seatiles+nonrivers]->waterflow;
 
-	//Find and delete small or dry lakes:
+	//Find and try to delete small or dry lakes:
 	for (int i = 0; i < lakes; ++i) {
 		laketype *l = &lake[i];
 		if (l->merged_into != -1) continue; //Skip merged lakes
 		tiletype *out = &tile[l->outflow_x][l->outflow_y];
-		//Rule 1: delete "dry" lakes, if possible  DEL 84. all deletable: 226
-		//"dry" plus all size 1: 215
-		//next attempt: "dry" and all deletables, except those with no incoming river.
-		//!!!look at waterflow in the lake's priq, to see if there will be incoming rivers !!!
-		//might get a little better, keep some lakes that start rivers.
+
+		//tergen laketest 13 0 100 200 425 40|grep DEL|wc
+		//Delete only dry lakes: DEL 84
+		//Delete all deletable:  DEL 226
+		//Delete dry+all size 1: DEL 215
+		//Delete dry+deletable with incoming river (protect river-starting lakes): DEL 210
+
+		//If the outflow is too small for a proper river, (dry lake) attempt deletion:
 		if (out->waterflow < min_waterflow) try_del_lake(tile, l);
-		else if (l->tiles == 1) try_del_lake(tile, l);
+
+		//Otherwise, attempt deletion if the lake has incoming rivers
+		else if (cnt_incoming_rivers(l, min_waterflow, out)) try_del_lake(tile, l);
+
+		//This may seem to attempt deleting almost all lakes. But it works reasonably well,
+		//as try_del_lake() fails on any lake where some lake tile doesn't touch the outflow tile.
+
+		//Without this lake thinning, there are too many lakes. With it, the terrain looks better.
+		//Changes to the heightmap generation may force a retuning of this.
 	}
 
 	//Start visible rivers from all high-flow tiles:
@@ -1162,11 +1189,12 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 		run_visible_river(x, y, tile, seaheight);
 	}
 
-	//Start visible rivers from all lake exit tiles:
+	//Start visible rivers from all lake exit tiles,
+	//so every lake will have a river to the sea.
 	for (int i = 0; i < lakes; ++i) {
 		laketype *l = &lake[i];
 		if (l->merged_into != -1) continue; //skip merged lakes
-		if (!l->tiles) continue; //skip deleted lakes
+		if (!l->tiles) continue; //also skip deleted lakes
 		run_visible_river(l->outflow_x, l->outflow_y, tile, seaheight);
 	}
 }
