@@ -719,7 +719,15 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 			for (n = 0; n < neighcount; ++n) if (!is_sea(tile[wrap(x+nb[n].dx, mapx)][wrap(y+nb[n].dy, mapy)].terrain)) break;
 			if (n == neighcount) {
 				//Double the island, or drown it. Either way avoids single tile islands
-				int num = random() % (neighcount*2);
+				int num = random() % (neighcount*2); //Pick a random direction for growing the island. High numbers will drown it
+
+				//Check if we may expand the island, without cutting off a piece of sea
+				if (num < neighcount) {
+					int nx = wrap(x+nb[num].dx, mapx);
+					int ny = wrap(y+nb[num].dy, mapy);
+					if (seacount(nx, ny, tile) < neighcount -2) num += neighcount; //Give up if no room
+				}
+
 				if (num >= neighcount) {
 					t->terrain = ' '; //Drown the island
 					t->river = 0;
