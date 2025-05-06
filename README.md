@@ -108,6 +108,6 @@ To see all of a map without playing through the game first, use edit mode and be
 - Apr. 2025: Support for savanna terrain type, which appeared in freeciv 3.1
 - Apr. 2025: Added big lakes to the river/waterflow simulation.
 - Mar. 2025: Improved plate tectonics, thicker mountain ranges, plate boundaries less obvious.
-- Mar. 2025: Asteroid strikes, cusing occational circular craters
+- Mar. 2025: Asteroid strikes, causing occational circular craters
 - Mar. 2025: Volcanoes now appear on tectonic plate edges only
 - Nov. 2023: tergen works for all freeciv topologies
