@@ -17,6 +17,8 @@ The following features has been observed in generated terrains:
 ![Fjord from erosion](img/river-fjord.png)
 - In the hills and mountians, river erosion may create a valley.
 ![Valley from river erosion](img/river-valley.png)
+- With the north coast blocked by a mountain range, water form a complex system of lakes and rivers before eventually reaching the sea. Every lake here has a river to the sea, an interesting terrain to explore by trireme.
+![Terrain with lakes](img/lakes5.png)
 
 ## Plate tectonics
 Some plates are created, with random center coordinates and direction of movement. A bigger world has more and bigger plates. Each tile is assigned to the closest plate center, so the plates become convex polygons. After this, many rounds of fractional plate movement. Every plate will move a little in its assigned direction, but only a few plates actually moves each turn. Where plates move apart, rifts appear in the height map. Continents may be torn apart. Where plates collide, mountain ranges are raised by adding up heights. Such ranges tend to follow plate boundaries. Occationally, an asteroid strikes, leaving a crater.
