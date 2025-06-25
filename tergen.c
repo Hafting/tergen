@@ -284,7 +284,7 @@ typedef struct {
 	unsigned char oldflow; //fourth root of prev. flow. Used for re-routing rivers
 	char steepness : 5; //1+log2 of height difference to lowest neighbour. -1 if unset, max 14.
 	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
-	unsigned char river : 1; //for river assignment during map output
+	unsigned char river : 2; //for river assignment during map output. 0:dry, 1:river, 2:big river 
 	signed char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5. -1 for none
 } tiletype;
 
@@ -581,6 +581,10 @@ bool is_sea(char c) {
 	return (c == ' ') | (c == ':');
 }
 
+//Test for water (deep sea, shallow sea, lake)
+bool is_water(char c) {
+	return (c == ' ') | (c == ':') | (c == '+');
+}
 //Test for arctic terrain. 
 bool is_arctic(char c) {
 	return (c == 'a') | (c == 'A');
@@ -591,9 +595,9 @@ bool is_mountain(char c) {
 	return (c == 'm') | (c == 'v');
 }
 
-//Test if a tile is wet. Sea, lake, or land with river on it
-bool is_wet(tiletype *t) {
-	return (t->terrain == ' ') | (t->terrain == ':') | (t->terrain == '+') | (t->river != 0);
+//Test if a tile is wet. Sea, lake, or land with a minimum size river on it
+bool is_wet(tiletype *t, unsigned char min_river) {
+	return (t->terrain == ' ') | (t->terrain == ':') | (t->terrain == '+') | (t->river >= min_river);
 }
 
 //counts sea neighbours around [x][y].  The central tile is not counted
@@ -786,6 +790,18 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 
 	So keep those with <2 river neighbours, or >=2 disjoint dry neighbour sets.
 
+	big and small rivers:
+	The rule above applies as-is to small rivers. Kept if they are needed to keep
+	water flowing, removed otherwise.
+
+	big rivers must be kept whole, i.e. don't remove a big river if water is then routed through
+	a small river.  So the rules above are useable for big rivers, but small rivers are
+	then considered dry stuff. But this is too simple. We cannot delete an unneeded big river
+	if some small river is using it as en exit either.
+
+	A big river tile is removable only if neither a small nor a big river is needed there.
+  if a big river is not needed but a small is, downgrade the big river
+
 	ice correction: no river on arctic, unless there is a non-arctic neighbour with river/sea
 	In this case, a 'm' with low temperature IS arctic.
 
@@ -803,17 +819,32 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 		recover_xy(tile, t, &x, &y);
 		neighbourtype *nb = (y & 1) ? nodd[topo] : nevn[topo];
 		int last_nb = neighbours[topo] - n_inc;
-		bool prev_dry = !is_wet(&tile[wrap(x+nb[last_nb].dx,mapx)][wrap(y+nb[last_nb].dy,mapy)]);
-		int river_neigh = 0; //simple count of neighbour tiles with river on them
-		int dry_neigh = 0;   //count of disjoint neighbours with dry land
+		tiletype *tnb_last = &tile[wrap(x+nb[last_nb].dx,mapx)][wrap(y+nb[last_nb].dy,mapy)];
+		bool prev_dry_1 = !is_wet(tnb_last, 1);
+		bool prev_dry_2 = !is_wet(tnb_last, 2);
+		int river_neigh_1 = 0; //count of neighbour tiles with river on them
+		int river_neigh_2 = 0; //count of neighbour tiles with big river on them
+		int dry_neigh_1 = 0;   //count of disjoint neighbours with dry land
+		int dry_neigh_2 = 0;   //count of neighbours with land without a big river
 		for (int n = 0; n < neighbours[topo]; n += n_inc) {
 			tiletype *tnb = &tile[wrap(x+nb[n].dx,mapx)][wrap(y+nb[n].dy,mapy)];
-			river_neigh += tnb->river;
-			bool dry = !is_wet(tnb);
-			dry_neigh += (dry && !prev_dry);
-			prev_dry = dry;
+			river_neigh_1 += (tnb->river >= 1);
+			river_neigh_2 += (tnb->river == 2);
+			bool dry1 = !is_wet(tnb, 1);
+			bool dry2 = !is_wet(tnb, 2);
+			dry_neigh_1 += (dry1 && !prev_dry_1);
+			dry_neigh_2 += (dry2 && !prev_dry_2);
+			prev_dry_1 = dry1;
+			prev_dry_2 = dry2;
 		}
-		if (river_neigh >= 2 && dry_neigh < 2) t->river = 0;
+		//Downgrade river, if possible:
+		if ( (t->river == 2) && ( (river_neigh_2 >= 2 || river_neigh_2 == 0) && dry_neigh_2 < 2) ) {
+			t->river = 1;
+		}
+		//Remove river, if possible:
+		if ( (t->river == 1) && ( (river_neigh_1 >= 2 || river_neigh_1 == 0) && dry_neigh_1 < 2) ) {
+			t->river = 0;
+		}
 	}
 }
 
@@ -1063,12 +1094,14 @@ The weather simulation makes lakes even where there is very little waterflow. So
 */
 
 //Run a single river to the sea/a lake/another river
-void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel) {
+void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel, int big_waterflow) {
+	unsigned char rivertype = 1; //small river
 	while (1) {
 		tiletype *t = &tile[x][y];
-		if (t->river | (t->terrain == ':') | (t->terrain == ' ') | (t->terrain == '+') ) return;
+		if ((t->river >= rivertype) | (t->terrain == ':') | (t->terrain == ' ') | (t->terrain == '+') ) return;
 		if (t->height <= sealevel) return;
-		t->river = 1;
+		if (t->waterflow >= big_waterflow) rivertype = 2; 
+		t->river = rivertype;
 		if (t->lowestneigh < 0) {
 			printf("x=%i y=%i height=%i lowestneigh=%i '%c'\n",x,y,t->height,t->lowestneigh,t->terrain);
 			fail("bad lowestneigh");
@@ -1160,6 +1193,9 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 	}
 	int min_waterflow = tp[seatiles+nonrivers]->waterflow;
 
+	//Minimum waterflow for a big river. About ¼ of rivertiles are big.
+	int big_waterflow = tp[seatiles+nonrivers + 3*rivertiles/4]->waterflow;
+
 	//Find and try to delete small or dry lakes:
 	for (int i = 0; i < lakes; ++i) {
 		laketype *l = &lake[i];
@@ -1189,7 +1225,7 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 	for (int i = seatiles + nonrivers; i < mapx*mapy; ++i) {
 		int x, y;
 		recover_xy(tile, tp[i], &x, &y);
-		run_visible_river(x, y, tile, seaheight);
+		run_visible_river(x, y, tile, seaheight, big_waterflow);
 	}
 
 	//Start visible rivers from all lake exit tiles,
@@ -1198,11 +1234,13 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 		laketype *l = &lake[i];
 		if (l->merged_into != -1) continue; //skip merged lakes
 		if (!l->tiles) continue; //also skip deleted lakes
-		run_visible_river(l->outflow_x, l->outflow_y, tile, seaheight);
+		run_visible_river(l->outflow_x, l->outflow_y, tile, seaheight, big_waterflow);
 	}
 }
 
 void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
+	char *riversymbols;
+	int riverlayer;
 	//pre-terrain stuff
 	fprintf(f, "[scenario]\n");
 	fprintf(f, "game_version=3000100\n");
@@ -1224,8 +1262,24 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "revision=\"3.0.1\"\n");
 	fprintf(f, "technology_size=88\n");
 	fprintf(f, "technology_vector=\"A_NONE\",\"Advanced Flight\",\"Alphabet\",\"Amphibious Warfare\",\"Astronomy\",\"Atomic Theory\",\"Automobile\",\"Banking\",\"Bridge Building\",\"Bronze Working\",\"Ceremonial Burial\",\"Chemistry\",\"Chivalry\",\"Code of Laws\",\"Combined Arms\",\"Combustion\",\"Communism\",\"Computers\",\"Conscription\",\"Construction\",\"Currency\",\"Democracy\",\"Economics\",\"Electricity\",\"Electronics\",\"Engineering\",\"Environmentalism\",\"Espionage\",\"Explosives\",\"Feudalism\",\"Flight\",\"Fusion Power\",\"Genetic Engineering\",\"Guerilla Warfare\",\"Gunpowder\",\"Horseback Riding\",\"Industrialization\",\"Invention\",\"Iron Working\",\"Labor Union\",\"Laser\",\"Leadership\",\"Literacy\",\"Machine Tools\",\"Magnetism\",\"Map Making\",\"Masonry\",\"Mass Production\",\"Mathematics\",\"Medicine\",\"Metallurgy\",\"Miniaturization\",\"Mobile Warfare\",\"Monarchy\",\"Monotheism\",\"Mysticism\",\"Navigation\",\"Nuclear Fission\",\"Nuclear Power\",\"Philosophy\",\"Physics\",\"Plastics\",\"Polytheism\",\"Pottery\",\"Radio\",\"Railroad\",\"Recycling\",\"Refining\",\"Refrigeration\",\"Robotics\",\"Rocketry\",\"Sanitation\",\"Seafaring\",\"Space Flight\",\"Stealth\",\"Steam Engine\",\"Steel\",\"Superconductors\",\"Tactics\",\"The Corporation\",\"The Republic\",\"The Wheel\",\"Theology\",\"Theory of Gravity\",\"Trade\",\"University\",\"Warrior Code\",\"Writing\"\n");
-	fprintf(f, "extras_size=34\n");
-	fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fortress\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"River\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+	//tergen generates the extras "River", and possibly "Big river" (extended terrain)
+	//The extra numbers must match the extras vector. For now, hardcoded.
+	//Ideally: parse the rules file!!!	
+	if (!extended_terrain) {
+		//Plain freeciv 3.1. Rivers exist, but no big rivers
+		riverlayer = 4;
+		riversymbols = "022"; //no river or small river
+//		fprintf(f, "extras_size=34\n");
+//		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fortress\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"River\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+		fprintf(f, "extras_size=38\n"); //10 extras, 00 through 09
+		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+	} else {
+		//freeciv 3.1 with hh ruleset, where the "Big river" extra is present
+		riverlayer = 4;
+		riversymbols = "024"; //no river, small river, big river
+		fprintf(f, "extras_size=39\n"); //10 extras, 00 through 09
+		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Big river\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+	}
 	fprintf(f, "action_size=44\n");
 	fprintf(f, "action_vector=\"Establish Embassy\",\"Establish Embassy Stay\",\"Investigate City\",\"Investigate City Spend Unit\",\"Poison City\",\"Poison City Escape\",\"Steal Gold\",\"Steal Gold Escape\",\"Sabotage City\",\"Sabotage City Escape\",\"Targeted Sabotage City\",\"Targeted Sabotage City Escape\",\"Steal Tech\",\"Steal Tech Escape Expected\",\"Targeted Steal Tech\",\"Targeted Steal Tech Escape Expected\",\"Incite City\",\"Incite City Escape\",\"Establish Trade Route\",\"Enter Marketplace\",\"Help Wonder\",\"Bribe Unit\",\"Sabotage Unit\",\"Sabotage Unit Escape\",\"Capture Units\",\"Found City\",\"Join City\",\"Steal Maps\",\"Steal Maps Escape\",\"Bombard\",\"Suitcase Nuke\",\"Suitcase Nuke Escape\",\"Explode Nuclear\",\"Destroy City\",\"Expel Unit\",\"Recycle Unit\",\"Disband Unit\",\"Home City\",\"Upgrade Unit\",\"Paradrop Unit\",\"Airlift Unit\",\"Attack\",\"Conquer City\",\"Heal Unit\"\n");
 	fprintf(f, "action_decision_size=3\n");
@@ -1286,19 +1340,36 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 		fprintf(f, "\"\n");
 	}
 	fprintf(f, "startpos_count=0\n");
+//rivertest.sav:
+//e00: bare "0"
+//e01: "2", men spredt. ressurs? by?
+//e02: "bare "0"
+//e03: to kjeder med "4" (road?), to kjeder med "c" (8+4 rail+road?)
+//e04: mange kjeder med "2". Elv? Spredt "8" (ressurs?) spredt "a" (8+2)  noen klumper med 4 litt 6.  4=bigriver?
+//e05: spredt 1/2/4
+//e06: spredt 1/2/4
+//e07: spredt 1/2/4
+//e08: spredt 1/2/4/8
+//e09: spredt 1/4
+/*
+extras_vector=0:1:"Irrigation","Mine","Oil Well",0:8:"Oil Platform",1:1:"Pollution","Hut","Farmland",1:8:"Fall
+out",2:1:"Fort","Fortress","Airstrip",2:8:"Airbase",3:1:"Buoy","Ruins",3:4:"Road",3:8:"Railroad",4:1:"Maglev",4:2"River",
+4:4:"Big river",4:8:"Gold","Iron","Game","Furs","Coal","Fish","Fruit","Gems","Buffalo","Wheat","Oasis"
+,"Peat","Pheasant","Resources","Ivory","Silk","Spice","Whales","Wine","Oil"
+*/
 
 	//other layers. No info, but avoids warnings about incomplete map:
-	for (int layer = 0; layer <= 8; ++layer) if (layer != 3) {
+	for (int layer = 0; layer <= 8; ++layer) if (layer != riverlayer) {
 		for (int y = 0; y < mapy; ++y) {
 			fprintf(f, "e%02i_%04i=\"", layer, y);
 			for (int x = 0; x < mapx; ++x) fprintf(f, "0");
 			fprintf(f, "\"\n");
 		}
 	} else {
-		//Layer 3, where "2" is river
+		//The river layer
 		for (int y = 0; y < mapy; ++y) {
-			fprintf(f, "e03_%04i=\"", y);
-			for (int x = 0; x < mapx; ++x) fprintf(f, tile[x][y].river ? "2" : "0");
+			fprintf(f, "e%02i_%04i=\"", riverlayer, y);
+			for (int x = 0; x < mapx; ++x) fprintf(f, "%c", riversymbols[tile[x][y].river]);
 			fprintf(f, "\"\n");
 		}		
 	}
