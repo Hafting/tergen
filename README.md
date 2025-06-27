@@ -67,9 +67,12 @@ The name is stored in the generated file (tergen.sav), and will appear in the sc
 13 - hex tiles, isometric with extended terrain features.
 
 ### Extended terrain fetaures
-The terrain may have hills of many types, such as desert hills, polar hills, tundra hills and forested hills. There are also volcanoes. You will need a tileset and a ruleset providing such graphics; this is avaliable from my [freecivstuff](https://github.com/Hafting/freecivstuff) repository. 
+The terrain may have big rivers, and a selection of hills. Hill types: plain hills, desert hills, polar hills, tundra hills and forested hills. There are also volcanoes. You will need a tileset and a ruleset providing such graphics; this is avaliable from my [freecivstuff](https://github.com/Hafting/freecivstuff) repository.
 
-Currently, only 13 (isometric hex tiles) have tileset support. tergen supports 10, 11 and 12, but there is no known tileset providing extended hills for the other topologies.  
+Currently, only 13 (isometric hex tiles) have tileset support. tergen supports 10, 11 and 12, but there is no known tileset providing extended hills for the other topologies.
+
+The big rivers allow ships, unlike the normal smaller rivers. Some lakes and inland cities may be reachable by ship.  In this example, a destroyer fought its way up a big river:
+![Game terrain with big rivers](img/destroyer_river.png)
 
 ### Wrap parameter
 0 - no wrap, the game map has 4 edges. Mercator style map, where the north and south edges are polar terrain, and equator follows the middle of the map.
