@@ -286,6 +286,7 @@ typedef struct {
 	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
 	unsigned char river : 2; //for river assignment during map output. 0:dry, 1:river, 2:big river 
 	signed char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5. -1 for none
+	unsigned char iced : 1; //0 normal, 1 covered in sea ice (extended terrain)
 } tiletype;
 
 
@@ -2742,6 +2743,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		tiletype *t = &tile[x][y];
 		t->rocks = 0.0;
 		t->erosion = 0.0;
+		t->iced = 0;
 	}
 
 	//Terrain BEFORE plate tectonics (debug):
