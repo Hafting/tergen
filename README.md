@@ -110,6 +110,7 @@ To see all of a map without playing through the game first, use edit mode and be
 - The simulation needs some sea. Sea provides water for weather simulation, and termination for rivers. A world with very little sea may fail in strange ways. Earth is 29% land, 71% sea.
 
 ## History
+- July 2025: Extended terrain using Ice extra for frozen seas/lakes
 - June 2025: Generation of big rivers, when using extended terrain.
 - May  2025: Much work on erosion, lakes and sea level. All rivers should reach the sea now.
 - Apr. 2025: Use relative wetness for assigning terrain types. Better placement of deserts
