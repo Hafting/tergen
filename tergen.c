@@ -1163,6 +1163,7 @@ void try_del_lake(tiletype tile[mapx][mapy], laketype *l) {
 			tn->height = t->height;
 			tn->terrain = t->terrain;
 			tn->wetness = t->wetness;
+			tn->iced = 0;
 			//Opposite direction, points from tn to t:
 			tn->lowestneigh = (n + neighbours[topo]/2) % neighbours[topo];
 		}
@@ -1241,6 +1242,7 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 
 void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	char *riversymbols;
+	char icesymbol = '8';
 	int riverlayer;
 	//pre-terrain stuff
 	fprintf(f, "[scenario]\n");
@@ -1278,8 +1280,8 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 		//freeciv 3.1 with hh ruleset, where the "Big river" extra is present
 		riverlayer = 4;
 		riversymbols = "024"; //no river, small river, big river
-		fprintf(f, "extras_size=39\n"); //10 extras, 00 through 09
-		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Big river\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+		fprintf(f, "extras_size=40\n"); //10 extras, 00 through 09
+		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Big river\",\"Ice\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
 	}
 	fprintf(f, "action_size=44\n");
 	fprintf(f, "action_vector=\"Establish Embassy\",\"Establish Embassy Stay\",\"Investigate City\",\"Investigate City Spend Unit\",\"Poison City\",\"Poison City Escape\",\"Steal Gold\",\"Steal Gold Escape\",\"Sabotage City\",\"Sabotage City Escape\",\"Targeted Sabotage City\",\"Targeted Sabotage City Escape\",\"Steal Tech\",\"Steal Tech Escape Expected\",\"Targeted Steal Tech\",\"Targeted Steal Tech Escape Expected\",\"Incite City\",\"Incite City Escape\",\"Establish Trade Route\",\"Enter Marketplace\",\"Help Wonder\",\"Bribe Unit\",\"Sabotage Unit\",\"Sabotage Unit Escape\",\"Capture Units\",\"Found City\",\"Join City\",\"Steal Maps\",\"Steal Maps Escape\",\"Bombard\",\"Suitcase Nuke\",\"Suitcase Nuke Escape\",\"Explode Nuclear\",\"Destroy City\",\"Expel Unit\",\"Recycle Unit\",\"Disband Unit\",\"Home City\",\"Upgrade Unit\",\"Paradrop Unit\",\"Airlift Unit\",\"Attack\",\"Conquer City\",\"Heal Unit\"\n");
@@ -1341,25 +1343,8 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 		fprintf(f, "\"\n");
 	}
 	fprintf(f, "startpos_count=0\n");
-//rivertest.sav:
-//e00: bare "0"
-//e01: "2", men spredt. ressurs? by?
-//e02: "bare "0"
-//e03: to kjeder med "4" (road?), to kjeder med "c" (8+4 rail+road?)
-//e04: mange kjeder med "2". Elv? Spredt "8" (ressurs?) spredt "a" (8+2)  noen klumper med 4 litt 6.  4=bigriver?
-//e05: spredt 1/2/4
-//e06: spredt 1/2/4
-//e07: spredt 1/2/4
-//e08: spredt 1/2/4/8
-//e09: spredt 1/4
-/*
-extras_vector=0:1:"Irrigation","Mine","Oil Well",0:8:"Oil Platform",1:1:"Pollution","Hut","Farmland",1:8:"Fall
-out",2:1:"Fort","Fortress","Airstrip",2:8:"Airbase",3:1:"Buoy","Ruins",3:4:"Road",3:8:"Railroad",4:1:"Maglev",4:2"River",
-4:4:"Big river",4:8:"Gold","Iron","Game","Furs","Coal","Fish","Fruit","Gems","Buffalo","Wheat","Oasis"
-,"Peat","Pheasant","Resources","Ivory","Silk","Spice","Whales","Wine","Oil"
-*/
 
-	//other layers. No info, but avoids warnings about incomplete map:
+	//Other layers. Avoids warnings about incomplete map:
 	for (int layer = 0; layer <= 8; ++layer) if (layer != riverlayer) {
 		for (int y = 0; y < mapy; ++y) {
 			fprintf(f, "e%02i_%04i=\"", layer, y);
@@ -1367,10 +1352,11 @@ out",2:1:"Fort","Fortress","Airstrip",2:8:"Airbase",3:1:"Buoy","Ruins",3:4:"Road
 			fprintf(f, "\"\n");
 		}
 	} else {
-		//The river layer
+		//The river+ice layer
 		for (int y = 0; y < mapy; ++y) {
 			fprintf(f, "e%02i_%04i=\"", riverlayer, y);
-			for (int x = 0; x < mapx; ++x) fprintf(f, "%c", riversymbols[tile[x][y].river]);
+			//Simplified, as there is never a river and sea ice on the same tile:
+			for (int x = 0; x < mapx; ++x) fprintf(f, "%c", tile[x][y].iced ? icesymbol : riversymbols[tile[x][y].river]);
 			fprintf(f, "\"\n");
 		}		
 	}
@@ -1539,6 +1525,12 @@ void set_tile(tiletype *t, char lowtype, char hilltype) {
 	}
 }
 
+//Only for extended terrain
+void set_tile_ice(tiletype *t, char lowtype, char hilltype) {
+	if (t->terrain != '+') set_tile(t, lowtype, hilltype);
+	else t->iced = (t->temperature <= T_GLACIER);
+}
+
 /* Places a volcano at x,y.
 	 Some small chance that it 'spreads' to neighbour riverless mountain tiles.
 	 Volcanoes also melt ice and fertilize terrain around them. */
@@ -1658,13 +1650,15 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 
 	//Classify terrain by height, and sometimes temperature
 	int limit, j = 0;
-	//Deep sea or ice
+	//Deep sea, perhaps with ice
 	for (; j < deepseatiles; ++j) {
-		tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ':';
+		tp[j]->terrain = ':';
+		tp[j]->iced = (tp[j]->temperature <= T_SEAICE);
 	}
-	//Shallow sea or ice
+	//Shallow sea, perhaps with ice
 	for (; j < seatiles; ++j) {
-		tp[j]->terrain = tp[j]->temperature < T_SEAICE ? 'a' : ' ';
+		tp[j]->terrain = ' ';
+		tp[j]->iced = (tp[j]->temperature <= T_SEAICE);
 	}
 	int firstland = j;
 	//Assign low land
@@ -1678,9 +1672,9 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	qsort(tp + firstland, landtiles-mountains, sizeof(tiletype *), &q_compare_temperature);
 
 	//Assign arctic terrain types
-	for (j = firstland; tp[j]->temperature < T_GLACIER; ++j) set_tile(tp[j], 'a', 'A');
+	for (j = firstland; tp[j]->temperature < T_GLACIER; ++j) set_tile_ice(tp[j], 'a', 'A');
 	//Assign tundra terrain types
-	for (; tp[j]->temperature < T_TUNDRA; ++j) set_tile(tp[j], 't', 'T');
+	for (; tp[j]->temperature < T_TUNDRA; ++j) set_tile_ice(tp[j], 't', 'T');
 
 	int firsttempered = j;
 	int total = i - firsttempered - mountains;
