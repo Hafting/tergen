@@ -286,7 +286,6 @@ typedef struct {
 	unsigned char mark : 1; //for depth-first search, volcano calculations etc.
 	unsigned char river : 2; //for river assignment during map output. 0:dry, 1:river, 2:big river 
 	signed char lowestneigh : 4; //direction of lowest neighbour 0..7 or 0..5. -1 for none
-	unsigned char iced : 1; //0 normal, 1 covered in sea ice (extended terrain)
 } tiletype;
 
 
@@ -579,12 +578,12 @@ int q_compare_temperature(void const *p1, void const *p2) {
 
 //Test for sea, deep or shallow 
 bool is_sea(char c) {
-	return (c == ' ') | (c == ':');
+	return (c == ' ') | (c == ':') | (c == '_') | (c == ';');
 }
 
 //Test for water (deep sea, shallow sea, lake)
 bool is_water(char c) {
-	return (c == ' ') | (c == ':') | (c == '+');
+	return (c == ' ') | (c == ':') | (c == '+') | (c == '_') | (c == ';') | (c == '-');
 }
 //Test for arctic terrain. 
 bool is_arctic(char c) {
@@ -598,7 +597,7 @@ bool is_mountain(char c) {
 
 //Test if a tile is wet. Sea, lake, or land with a minimum size river on it
 bool is_wet(tiletype *t, unsigned char min_river) {
-	return (t->terrain == ' ') | (t->terrain == ':') | (t->terrain == '+') | (t->river >= min_river);
+	return (t->terrain == ' ') | (t->terrain == ':') | (t->terrain == '+') | (t->terrain == '_') | (t->terrain == ';') | (t->terrain == '-') | (t->river >= min_river);
 }
 
 //counts sea neighbours around [x][y].  The central tile is not counted
@@ -671,6 +670,13 @@ void lake_to_sea(int x, int y, tiletype tile[mapx][mapy]) {
 	}
 }
 
+//Ensure that a sea tile is shallow, not deep. Don't change ice status
+//should not be called for other tile types
+void makeshallow(tiletype *t) {
+	if (t->terrain == ':') t->terrain = ' ';
+	else if (t->terrain == ';') t->terrain = '_';
+}
+
 /*
 		Fixups. 
 		 - Small landlocked pieces of sea become lakes
@@ -695,7 +701,7 @@ on waterflow. The tile order is then very different from the order in tile[][].
 
 To further randomize, step through tp[] with large jumps, similar to the search order
 in a hash table. It is then necessary to find a step size relative prime to mapx*mapy,
-which is easy enough.
+which is easy enough. (not done yet)
 
 Using the sorted tp has other advantages too. Deep sea correction should not iterate through land tiles.
 Land corrections should not iterate through sea. Better performance...
@@ -762,8 +768,8 @@ void terrain_fixups(tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], int seat
 			int seacnt = seacount(x, y, tile);
 			int landcnt = neighcount - seacnt;
 
-			if (landcnt >= 2) t->terrain = ' '; //Make it shallow
-			else if (landcnt == 1 && (random() & 7)) t->terrain = ' '; //Be nice to triremes, usually
+			if (landcnt >= 2) makeshallow(t); //Make it shallow
+			else if (landcnt == 1 && (random() & 7)) makeshallow(t); //Be nice to triremes, usually
 		}
 	}
 
@@ -1099,7 +1105,7 @@ void run_visible_river(int x, int y, tiletype tile[mapx][mapy], short sealevel, 
 	unsigned char rivertype = 1; //small river
 	while (1) {
 		tiletype *t = &tile[x][y];
-		if ((t->river >= rivertype) | (t->terrain == ':') | (t->terrain == ' ') | (t->terrain == '+') ) return;
+		if ((t->river >= rivertype) | (t->terrain == ':') | (t->terrain == ';') | (t->terrain == ' ') | (t->terrain == '_') | (t->terrain == '+') | (t->terrain == '-') ) return;
 		if (t->height <= sealevel) return;
 		if (t->waterflow >= big_waterflow) rivertype = 2; 
 		t->river = rivertype;
@@ -1163,7 +1169,6 @@ void try_del_lake(tiletype tile[mapx][mapy], laketype *l) {
 			tn->height = t->height;
 			tn->terrain = t->terrain;
 			tn->wetness = t->wetness;
-			tn->iced = 0;
 			//Opposite direction, points from tn to t:
 			tn->lowestneigh = (n + neighbours[topo]/2) % neighbours[topo];
 		}
@@ -1242,11 +1247,10 @@ void assign_rivers(tiletype **tp, int wateronland, tiletype tile[mapx][mapy], sh
 
 void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	char *riversymbols;
-	char icesymbol = '8';
 	int riverlayer;
 	//pre-terrain stuff
 	fprintf(f, "[scenario]\n");
-	fprintf(f, "game_version=3000100\n");
+	fprintf(f, "game_version=3020000\n");
 	fprintf(f, "is_scenario=TRUE\n");
 	fprintf(f, "name=\"%s\"\n", nametxt);
 	fprintf(f, "description=\"Made by the tergen terrain generator\\n\\nInvocation:\\n%s\"\n",paramtxt);
@@ -1254,22 +1258,33 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "players=FALSE\n");
 	fprintf(f, "startpos_nations=FALSE\n");
 	fprintf(f, "lake_flooding=TRUE\n");
-	fprintf(f, "ruleset_locked=TRUE\n");
+	fprintf(f, "handmade=FALSE\n");
+	fprintf(f, "ruleset_locked=%s\n", extended_terrain ? "TRUE" : "FALSE");
 	fprintf(f, "ruleset_caps=\"+std-terrains\"\n");
 
   fprintf(f, "[savefile]\n");
 	fprintf(f, "options=\" +version3\"\n");
-	fprintf(f, "rulesetdir=\"%s\"\n", extended_terrain ? "hh" : "civ2civ3");
-	fprintf(f, "version=40\n");
+	fprintf(f, "version=60\n");
 	fprintf(f, "reason=\"Scenario\"\n");
-	fprintf(f, "revision=\"3.0.1\"\n");
+	fprintf(f, "revision=\"3.2.0\"\n");
+	fprintf(f, "orig_version=\"old savegame3\"\n");
+	fprintf(f, "rulesetdir=\"%s\"\n", extended_terrain ? "hh" : "civ2civ3");
+	fprintf(f, "dbid=-1\n");
+	fprintf(f, "improvement_size=73\n");
+	fprintf(f, "improvement_vector=\"Airport\",\"Aqueduct\",\"Aqueduct, Lake\",\"Aqueduct, River\",\"Bank\",\"Barracks\",\"Barracks II\",\"Barracks III\",\"Cathedral\",\"City Walls\",\"Coastal Defense\",\"Colosseum\",\"Courthouse\",\"Factory\",\"Granary\",\"Harbour\",\"Hydro Plant\",\"Library\",\"Marketplace\",\"Mass Transit\",\"Mfg. Plant\",\"Nuclear Plant\",\"Offshore Platform\",\"Palace\",\"Ecclesiastical Palace\",\"Police Station\",\"Port Facility\",\"Power Plant\",\"Recycling Center\",\"Research Lab\",\"SAM Battery\",\"SDI Defense\",\"Sewer System\",\"Solar Plant\",\"Space Component\",\"Space Module\",\"Space Structural\",\"Stock Exchange\",\"Super Highways\",\"Supermarket\",\"Temple\",\"University\",\"Apollo Program\",\"A.Smith's Trading Co.\",\"Colossus\",\"Copernicus' Observatory\",\"Cure For Cancer\",\"Darwin's Voyage\",\"Eiffel Tower\",\"Great Library\",\"Great Wall\",\"Hanging Gardens\",\"Hoover Dam\",\"Isaac Newton's College\",\"J.S. Bach's Cathedral\",\"King Richard's Crusade\",\"Leonardo's Workshop\",\"Lighthouse\",\"Magellan's Expedition\",\"Manhattan Project\",\"Marco Polo's Embassy\",\"Michelangelo's Chapel\",\"Mausoleum of Mausolos\",\"Statue of Zeus\",\"Temple of Artemis\",\"Pyramids\",\"Internet\",\"Shakespeare's Theatre\",\"Statue of Liberty\",\"Sun Tzu's War Academy\",\"United Nations\",\"Women's Suffrage\",\"Coinage\"\n");
 	fprintf(f, "technology_size=88\n");
 	fprintf(f, "technology_vector=\"A_NONE\",\"Advanced Flight\",\"Alphabet\",\"Amphibious Warfare\",\"Astronomy\",\"Atomic Theory\",\"Automobile\",\"Banking\",\"Bridge Building\",\"Bronze Working\",\"Ceremonial Burial\",\"Chemistry\",\"Chivalry\",\"Code of Laws\",\"Combined Arms\",\"Combustion\",\"Communism\",\"Computers\",\"Conscription\",\"Construction\",\"Currency\",\"Democracy\",\"Economics\",\"Electricity\",\"Electronics\",\"Engineering\",\"Environmentalism\",\"Espionage\",\"Explosives\",\"Feudalism\",\"Flight\",\"Fusion Power\",\"Genetic Engineering\",\"Guerilla Warfare\",\"Gunpowder\",\"Horseback Riding\",\"Industrialization\",\"Invention\",\"Iron Working\",\"Labor Union\",\"Laser\",\"Leadership\",\"Literacy\",\"Machine Tools\",\"Magnetism\",\"Map Making\",\"Masonry\",\"Mass Production\",\"Mathematics\",\"Medicine\",\"Metallurgy\",\"Miniaturization\",\"Mobile Warfare\",\"Monarchy\",\"Monotheism\",\"Mysticism\",\"Navigation\",\"Nuclear Fission\",\"Nuclear Power\",\"Philosophy\",\"Physics\",\"Plastics\",\"Polytheism\",\"Pottery\",\"Radio\",\"Railroad\",\"Recycling\",\"Refining\",\"Refrigeration\",\"Robotics\",\"Rocketry\",\"Sanitation\",\"Seafaring\",\"Space Flight\",\"Stealth\",\"Steam Engine\",\"Steel\",\"Superconductors\",\"Tactics\",\"The Corporation\",\"The Republic\",\"The Wheel\",\"Theology\",\"Theory of Gravity\",\"Trade\",\"University\",\"Warrior Code\",\"Writing\"\n");
+	fprintf(f, "activities_size=16\n");
+	fprintf(f, "activities_vector=\"Idle\",\"Cultivate\",\"Mine\",\"Irrigate\",\"Fortified\",\"Sentry\",\"Pillage\",\"Goto\",\"Explore\",\"Transform\",\"Fortifying\",\"Clean\",\"Base\",\"Road\",\"Convert\",\"Plant\"\n");
+	fprintf(f, "specialists_size=3\n");
+	fprintf(f, "specialists_vector=\"elvis\",\"scientist\",\"taxman\"\n");
+	fprintf(f, "trait_size=4\n");
+	fprintf(f, "trait_vector=\"Expansionist\",\"Trader\",\"Aggressive\",\"Builder\"\n");
 	//tergen generates the extras "River", and possibly "Big river" (extended terrain)
 	//The extra numbers must match the extras vector. For now, hardcoded.
 	//Ideally: parse the rules file!!!	
 	if (!extended_terrain) {
-		//Plain freeciv 3.1. Rivers exist, but no big rivers
+		//Plain freeciv 3.2. Rivers exist, but no big rivers
 		riverlayer = 4;
 		riversymbols = "022"; //no river or small river
 //		fprintf(f, "extras_size=34\n");
@@ -1280,16 +1295,22 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 		//freeciv 3.1 with hh ruleset, where the "Big river" extra is present
 		riverlayer = 4;
 		riversymbols = "024"; //no river, small river, big river
-		fprintf(f, "extras_size=40\n"); //10 extras, 00 through 09
-		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Big river\",\"Ice\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
+		fprintf(f, "extras_size=39\n"); //9 extras, 00 through 08
+		fprintf(f, "extras_vector=\"Irrigation\",\"Mine\",\"Oil Well\",\"Oil Platform\",\"Pollution\",\"Hut\",\"Farmland\",\"Fallout\",\"Fort\",\"Fortress\",\"Airstrip\",\"Airbase\",\"Buoy\",\"Ruins\",\"Road\",\"Railroad\",\"Maglev\",\"River\",\"Big river\",\"Gold\",\"Iron\",\"Game\",\"Furs\",\"Coal\",\"Fish\",\"Fruit\",\"Gems\",\"Buffalo\",\"Wheat\",\"Oasis\",\"Peat\",\"Pheasant\",\"Resources\",\"Ivory\",\"Silk\",\"Spice\",\"Whales\",\"Wine\",\"Oil\"\n");
 	}
-	fprintf(f, "action_size=44\n");
-	fprintf(f, "action_vector=\"Establish Embassy\",\"Establish Embassy Stay\",\"Investigate City\",\"Investigate City Spend Unit\",\"Poison City\",\"Poison City Escape\",\"Steal Gold\",\"Steal Gold Escape\",\"Sabotage City\",\"Sabotage City Escape\",\"Targeted Sabotage City\",\"Targeted Sabotage City Escape\",\"Steal Tech\",\"Steal Tech Escape Expected\",\"Targeted Steal Tech\",\"Targeted Steal Tech Escape Expected\",\"Incite City\",\"Incite City Escape\",\"Establish Trade Route\",\"Enter Marketplace\",\"Help Wonder\",\"Bribe Unit\",\"Sabotage Unit\",\"Sabotage Unit Escape\",\"Capture Units\",\"Found City\",\"Join City\",\"Steal Maps\",\"Steal Maps Escape\",\"Bombard\",\"Suitcase Nuke\",\"Suitcase Nuke Escape\",\"Explode Nuclear\",\"Destroy City\",\"Expel Unit\",\"Recycle Unit\",\"Disband Unit\",\"Home City\",\"Upgrade Unit\",\"Paradrop Unit\",\"Airlift Unit\",\"Attack\",\"Conquer City\",\"Heal Unit\"\n");
+	fprintf(f, "multipliers_size=0\n");
+	fprintf(f, "city_options_size=3\n");
+	fprintf(f, "city_options_vector=\"Disband\",\"Sci_Specialists\",\"Tax_Specialists\"\n");
+	fprintf(f, "action_size=125\n");
+	fprintf(f, "action_vector=\"Establish Embassy\",\"Establish Embassy Stay\",\"Investigate City\",\"Investigate City Spend Unit\",\"Poison City\",\"Poison City Escape\",\"Steal Gold\",\"Steal Gold Escape\",\"Sabotage City\",\"Sabotage City Escape\",\"Targeted Sabotage City\",\"Targeted Sabotage City Escape\",\"Sabotage City Production\",\"Sabotage City Production Escape\",\"Steal Tech\",\"Steal Tech Escape Expected\",\"Targeted Steal Tech\",\"Targeted Steal Tech Escape Expected\",\"Incite City\",\"Incite City Escape\",\"Establish Trade Route\",\"Enter Marketplace\",\"Help Wonder\",\"Bribe Unit\",\"Capture Units\",\"Sabotage Unit\",\"Sabotage Unit Escape\",\"Found City\",\"Join City\",\"Steal Maps\",\"Steal Maps Escape\",\"Suitcase Nuke\",\"Suitcase Nuke Escape\",\"Explode Nuclear\",\"Nuke City\",\"Nuke Units\",\"Destroy City\",\"Expel Unit\",\"Disband Unit Recover\",\"Disband Unit\",\"Home City\",\"Unit Make Homeless\",\"Upgrade Unit\",\"Convert Unit\",\"Airlift Unit\",\"Attack\",\"Attack 2\",\"Suicide Attack\",\"Suicide Attack 2\",\"Surgical Strike Building\",\"Surgical Strike Production\",\"Conquer City\",\"Conquer City 2\",\"Conquer City 3\",\"Conquer City 4\",\"Bombard\",\"Bombard 2\",\"Bombard 3\",\"Bombard 4\",\"Bombard Lethal\",\"Bombard Lethal 2\",\"Fortify\",\"Cultivate\",\"Plant\",\"Transform Terrain\",\"Build Road\",\"Build Irrigation\",\"Build Mine\",\"Build Base\",\"Pillage\",\"Transport Board\",\"Transport Board 2\",\"Transport Board_3\",\"Transport Deboard\",\"Transport Embark\",\"Transport Embark 2\",\"Transport Embark 3\",\"Transport Embark 4\",\"Transport Disembark\",\"Transport Disembark 2\",\"Transport Disembark 3\",\"Transport Disembark 4\",\"Transport Load\",\"Transport Load 2\",\"Transport Load 3\",\"Transport Unload\",\"Spread Plague\",\"Spy Attack\",\"Conquer Extras\",\"Conquer Extras 2\",\"Conquer Extras 3\",\"Conquer Extras 4\",\"Enter Hut\",\"Enter Hut 2\",\"Enter Hut 3\",\"Enter Hut 4\",\"Frighten Hut\",\"Frighten Hut 2\",\"Frighten Hut 3\",\"Frighten Hut 4\",\"Heal Unit\",\"Heal Unit 2\",\"Paradrop Unit\",\"Paradrop Unit Conquer\",\"Paradrop Unit Frighten\",\"Paradrop Unit Frighten Conquer\",\"Paradrop Unit Enter\",\"Paradrop Unit Enter Conquer\",\"Wipe Units\",\"Spy Escape\",\"Unit Move\",\"Unit Move 2\",\"Unit Move 3\",\"Teleport\",\"Teleport Conquer\",\"Teleport Frighten\",\"Teleport Frighten Conquer\",\"Teleport Enter\",\"Teleport Enter Conquer\",\"Clean\",\"Collect Ransom\",\"User Action 1\",\"User Action 2\",\"User Action 3\",\"User Action 4\"\n");
 	fprintf(f, "action_decision_size=3\n");
 	fprintf(f, "action_decision_vector=\"nothing\",\"passive\",\"active\"\n");
+	fprintf(f, "server_side_agent_size=3\n");
+	fprintf(f, "server_side_agent_list=\"None\",\"Autosettlers\",\"Autoexplore\"\n");
 	fprintf(f, "terrident={\"name\",\"identifier\"\n\"Inaccessible\",\"i\"\n\"Lake\",\"+\"\n\"Ocean\",\" \"\n\"Deep Ocean\",\":\"\n\"Glacier\",\"a\"\n\"Desert\",\"d\"\n\"Forest\",\"f\"\n\"Grassland\",\"g\"\n\"Hills\",\"h\"\n\"Jungle\",\"j\"\n\"Mountains\",\"m\"\n\"Plains\",\"p\"\n\"Swamp\",\"s\"\n\"Tundra\",\"t\"\n");
-	if (extended_terrain) fprintf(f, "\"Arctic hills\",\"A\"\n\"Desert hills\",\"D\"\n\"Forest hills\",\"F\"\n\"Jungle hills\",\"J\"\n\"Tundra hills\",\"T\"\n\"Savanna\",\"S\"\n\"Volcanoes\",\"v\"\n");
+	if (extended_terrain) fprintf(f, "\"Arctic hills\",\"A\"\n\"Desert hills\",\"D\"\n\"Forest hills\",\"F\"\n\"Jungle hills\",\"J\"\n\"Tundra hills\",\"T\"\n\"Savanna\",\"S\"\n\"Volcanoes\",\"v\"\n\"Icy ocean\",\"_\"\n\"Icy deep Ocean\",\";\"\n\"Icy lake\",\"-\"\n");
 	fprintf(f, "}\n\n");
+	fprintf(f, "city_counters_order_size=0\n");
 
 	fprintf(f, "[game]\n");
 	fprintf(f, "server_state=\"S_S_INITIAL\"\n");
@@ -1305,10 +1326,10 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "year_0_hack=FALSE\n");
 	fprintf(f, "globalwarming=0\n");
 	fprintf(f, "heating=0\n");
-	fprintf(f, "warminglevel=8\n");
+	fprintf(f, "warminglevel=9\n");
 	fprintf(f, "nuclearwinter=0\n");
 	fprintf(f, "cooling=0\n");
-	fprintf(f, "coolinglevel=8\n");
+	fprintf(f, "coolinglevel=9\n");
 	fprintf(f, "save_players=FALSE\n");
 	fprintf(f, "save_known=FALSE\n");
 	fprintf(f, "\n");
@@ -1318,7 +1339,7 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "\n");
 
 	fprintf(f, "[script]\n");
-	fprintf(f, "code=$$\n");
+//	fprintf(f, "code=$$\n");
 	fprintf(f, "vars=$$\n");
 	fprintf(f, "\n");
 
@@ -1329,7 +1350,7 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "\"ysize\",%i,%i\n", mapy, mapy);
 	fprintf(f, "\"generator\",\"SCENARIO\",\"RANDOM\"\n");
 	fprintf(f, "}\n");
-	fprintf(f, "set_count=33\n");
+	fprintf(f, "set_count=81\n");
 	fprintf(f, "gamestart_valid=FALSE\n");
 	fprintf(f, "\n");
 
@@ -1345,18 +1366,17 @@ void output_terrain(FILE *f, tiletype tile[mapx][mapy], bool extended_terrain) {
 	fprintf(f, "startpos_count=0\n");
 
 	//Other layers. Avoids warnings about incomplete map:
-	for (int layer = 0; layer <= 8; ++layer) if (layer != riverlayer) {
+	for (int layer = 0; layer <= 9; ++layer) if (layer != riverlayer) {
 		for (int y = 0; y < mapy; ++y) {
 			fprintf(f, "e%02i_%04i=\"", layer, y);
 			for (int x = 0; x < mapx; ++x) fprintf(f, "0");
 			fprintf(f, "\"\n");
 		}
 	} else {
-		//The river+ice layer
+		//The river layer
 		for (int y = 0; y < mapy; ++y) {
 			fprintf(f, "e%02i_%04i=\"", riverlayer, y);
-			//Simplified, as there is never a river and sea ice on the same tile:
-			for (int x = 0; x < mapx; ++x) fprintf(f, "%c", tile[x][y].iced ? icesymbol : riversymbols[tile[x][y].river]);
+			for (int x = 0; x < mapx; ++x) fprintf(f, "%c", riversymbols[tile[x][y].river]);
 			fprintf(f, "\"\n");
 		}		
 	}
@@ -1525,10 +1545,10 @@ void set_tile(tiletype *t, char lowtype, char hilltype) {
 	}
 }
 
-//Only for extended terrain
+//Only for extended terrain. Freeze lakes if necessary
 void set_tile_ice(tiletype *t, char lowtype, char hilltype) {
 	if (t->terrain != '+') set_tile(t, lowtype, hilltype);
-	else t->iced = (t->temperature <= T_GLACIER);
+	else if (t->temperature <= T_GLACIER) t->terrain = '-';
 }
 
 /* Places a volcano at x,y.
@@ -1554,8 +1574,18 @@ void place_and_spread_volcano(tiletype tile[mapx][mapy], int x, int y) {
 			case 'p': //improve to grassland
 				tnb->terrain = 'g';
 				break;
-			case 's': //improve to ggrass. Or possibly forest/jungle, the tile was wet...
+			case 's': //improve to grass. Or possibly forest/jungle, the tile was wet...
 				tnb->terrain = 'g';
+				break;
+			case ';': //Melt deep sea ice
+				tnb->terrain = ':';
+				break;
+			case '_': //Melt shallow sea ice
+				tnb->terrain = ' ';
+				break;
+			case '-': //Melt icy lake
+				tnb->terrain = '+';
+				break;
 		}
 	}
 }
@@ -1619,7 +1649,7 @@ Terrain assignment for extended tile set:
 1. Sort the tileset on height. 
    The land percentage decides land/sea. 
 	 Sea is deep or shallow, depending on height
-	 Cold sea tiles freeze to ice.
+	 Cold sea tiles freeze to icy sea.
 	 Land is low, hill or mountain depending on height
 2. Sort the land on temperature. Sufficiently cold tiles become 
    arctic, arctic hill, tundra or tundra hill. No change to mountains.
@@ -1633,6 +1663,7 @@ Terrain assignment for extended tile set:
 #define p_to_S 0.3
 void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy], weatherdata weather[mapx][mapy], airboxtype air[mapx][mapy][9], short seaheight) {
 	int i = mapx * mapy;
+
 	int deepseatiles = 2 * seatiles / 3;
 	int highland = hillmountain * landtiles / 100;
 	int lowland = landtiles - highland;
@@ -1651,15 +1682,11 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	//Classify terrain by height, and sometimes temperature
 	int limit, j = 0;
 	//Deep sea, perhaps with ice
-	for (; j < deepseatiles; ++j) {
-		tp[j]->terrain = ':';
-		tp[j]->iced = (tp[j]->temperature <= T_SEAICE);
-	}
+	for (; j < deepseatiles; ++j) tp[j]->terrain = (tp[j]->temperature <= T_SEAICE) ? ';' : ':';
+	
 	//Shallow sea, perhaps with ice
-	for (; j < seatiles; ++j) {
-		tp[j]->terrain = ' ';
-		tp[j]->iced = (tp[j]->temperature <= T_SEAICE);
-	}
+	for (; j < seatiles; ++j) tp[j]->terrain = (tp[j]->temperature <= T_SEAICE) ? '_' : ' ';
+
 	int firstland = j;
 	//Assign low land
 	for (limit = j + lowland; j < limit; ++j) set(&tp[j]->terrain, 'l');
@@ -1682,8 +1709,8 @@ void output1(FILE *f, int land, int hillmountain, int tempered, int wateronland,
 	printf("%i tempered/tropical tiles\n", total);
 #endif
 	//Prepare the relative wetness field, for sorting on relative wetness
-	//Sorting on wetness alone is wrong. Cold places may have vary little rain, and
-	//become "desert". But a freeciv desert is a dry sand desert, like Sahara.
+	//Sorting on wetness alone is wrong. Cold places may have very little rain, and
+	//become "desert". But a freeciv desert is a dry sand desert, like the Sahara.
 	//Relative wetness: wetness, divided by evaporation potential.
 	//Little water but no evaporation (damp air, cold place): still a "wet" tile.
 	//Some water but lots of evaporation (dry air, high temperature): a "dry" tile
@@ -2737,7 +2764,6 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		tiletype *t = &tile[x][y];
 		t->rocks = 0.0;
 		t->erosion = 0.0;
-		t->iced = 0;
 	}
 
 	//Terrain BEFORE plate tectonics (debug):
@@ -3091,6 +3117,10 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		}
 	}
 
+	//Simulation done. Add random +-1 to temperatures. This breaks up boring patterns,
+	//for ice and other cases. Was too much, limited by another rnd factor.
+	//We want polar areas, but not too smooth.
+	for (int i = mapx*mapy-1; i >= 0; --i) if (random() & 1) tp[i]->temperature += ((random() & 3) - 1);
 	//print_platemap(tile); //dbg
 	FILE *f = fopen("tergen.sav", "w");
 	if (!tileset) {
