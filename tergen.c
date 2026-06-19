@@ -2601,16 +2601,25 @@ int erode(tiletype *t) {
 
 void mkplanet(int const land, int const hillmountain, int const tempered, int const wateronland, tiletype tile[mapx][mapy], tiletype *tp[mapx*mapy]) {
 	//Phase 1: initialization
+
+	//The initial terrain is made with repeating sine/cosine functions.
+	//To avoid discontinuities at world wraparound, we need
+	//a whole number of sine waves along mapx and mapy.
+	//
+	//A too repetitive world is avoided by having several such heightmap
+	//functions (h1, h2, h3...) and add them up. Combining functions
+	//that repeat at different rates, is a good idea.
 	
-	//Phase shifts, so a different seed will make a different map:
+	//Phase shifts, so a different seed will make a very different map.
+	//Different height functions shift differently, so we don't merely
+	//move the map in some direction.
 	float xphase = frand(-M_PI, M_PI);
 	float yphase = frand(-M_PI, M_PI);
 
 	//Initialize a wavy height map
 
 	/*Avoid very oval stuff on very non-square maps
-    To avoid discontinuities at world wraparound, we need
-		a whole number of sine waves along mapx and mapy. (for h1)
+
     If mapx is 256 and mapy is 64, we should have 4 times more waves
 		in the x direction, to preserve roundness. Exactly 4 times,
 		to avoid discontinuities.	Similar for 257,67...
@@ -2626,6 +2635,25 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		int factor = (mapy + 0.5 * mapx)/mapx;
 		mapy2 = (float)mapy / factor;
 	}
+   /*
+			fx,fy: radians, scaled so nonsquare maps gets a
+			repeating pattern based on the closest square,
+			instead of a very stretched pattern.
+
+			Example: mapx=170, mapy=66 yields:
+			factor=3
+			mapx2 = 56.6667  mapy2 = 66
+			fy goes from 0 to 2*pi, single wave
+			fx from 0 to 3*2*pi, three waves
+
+			Patterns based on sines/cosines to fx and fy should then
+			generate round initial continents, no matter how non-
+			square the map is.
+
+			fxb,fyb: radians, not scaled and with 0,0 in the middle.
+		*/
+
+
 	if (topo & 1) mapy2 *= 2; //ISO correction
 	float halfx = mapx / 2.0 - 0.5, halfy = mapy / 2.0 - 0.5;
 
@@ -2640,12 +2668,12 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		float frndx = frand(-.5, .5);
 		float frndy = frand(-.5, .5);
 
-		//Regular pattern, yields 8 round continents on quadratic grid
-		//edge errors on hex grid hidden in fuzz.
-		//with fussy edges
+		//h1: Regular pattern, yields 8 round continents on quadratic grid,
+		//    with 8 round seas between them.
+		//    Edge errors on hex grid hidden in fuzz, and height averaging
 		float h1 =  sinf(fx*2+frndx+xphase)*cosf(fy*2+frndy+yphase);
 
-		//Nice irregular pattern, breaks up repetition:
+		//h2: Nice irregular pattern, breaks up the overly repetitive h1
 		float h2 =  cosf(fxb*1.8*(1.0+sinf(fyb+yphase)/2))*cosf(fyb*1.8*(1.0+sinf(fxb+xphase)/2));
 
 		//High frequency noise, for more variation:
