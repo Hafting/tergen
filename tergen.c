@@ -2641,10 +2641,10 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			instead of a very stretched pattern.
 
 			Example: mapx=170, mapy=66 yields:
-			factor=3
-			mapx2 = 56.6667  mapy2 = 66
-			fy goes from 0 to 2*pi, single wave
-			fx from 0 to 3*2*pi, three waves
+				factor=3
+				mapx2 = 56.6667  mapy2 = 66
+				fy goes from 0 to 2*pi, single wave
+				fx from 0 to 3*2*pi, three waves
 
 			Patterns based on sines/cosines to fx and fy should then
 			generate round initial continents, no matter how non-
@@ -2665,7 +2665,7 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 		if (topo & 1) fyb /= 2; //ISO correction
 
 		//Random fuzziness
-		float frndx = frand(-.5, .5);
+		float frndx = frand(-.5, .5); //+- 30 degrees
 		float frndy = frand(-.5, .5);
 
 		//h1: Regular pattern, yields 8 round continents on quadratic grid,
@@ -2678,8 +2678,13 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 
 		//High frequency noise, for more variation:
 		float h3 =  sinf(fxb*13+frndy)*sinf(fyb*13+frndx);
+
+		//Noise amplitude modifier:
+		float h4 =  cosf(fxb*2+yphase)*sinf(fyb*2+xphase); //xyphase deliberately swapped here
+
 //		tile[x][y].height = 4000 + 1000*h1 + 1400*h2 + 1000*h3*h2; // 600..7400
-		tile[x][y].height = 2000 + 500*h1 + 700*h2 + 500*h3*h2; // 300..3700
+//		tile[x][y].height = 2000 + 500*h1 + 700*h2 + 500*h3*h2; // 300..3700
+		tile[x][y].height = 3000 + 1200*h1 + 1000*h2 + 500*h3*h4; //300..5700
 	}
 
 	//2 rounds of neighbourhood height averaging.  Improves chances of shallow sea near land,
@@ -2701,8 +2706,8 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 			heightsum += tile[wrap(x+neigh->dx,mapx)][wrap(y+neigh->dy,mapy)].rocks;
 		}
 		tile[x][y].height = heightsum / (neighbours[topo]+2); //rocks is not in use at this stage
-		short depth = 3700 - tile[x][y].height;
-		depth = (depth >= 0) ? depth : 0;        //Positive depth below 3700
+		short depth = 5700 - tile[x][y].height;
+		depth = (depth >= 0) ? depth : 0;        //Positive depth below 5700
 		tile[x][y].sediments = depth / 10;       //Low tiles get some sediments, high tiles don't.
 	}
 
@@ -2714,10 +2719,10 @@ void mkplanet(int const land, int const hillmountain, int const tempered, int co
 	//Phase 2: plate tectonics, weather & erosion
 	//Make the tectonic plates
 	int plates = 3 * (mapx+mapy) / 32; //3, for the smallest (16×16) map
+	if (plates > 255) plates = 255;
 
 	//Area divided by plates, is area per plate. The root gives a diameter
 	int plate_dist = sqrtf(mapx*mapy/plates); //9, for the smallest map. 20, for 80x80
-	if (plates > 255) plates = 255;
 
 	printf("Plate tectonics, trying %i plates\n", plates);
 	platetype plate[plates];
